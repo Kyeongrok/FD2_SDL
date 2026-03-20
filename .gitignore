@@ -1,0 +1,31 @@
+# Build outputs
+bin/
+*.o
+*.obj
+*.exe
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Libraries and third-party
+lib/
+include/SDL2/
+thirdparty/
+
+# Data files
+data/
+
+# opencode
+opencode.json
+
+# Extracted assets (generated)
+tools/extracted_images/
+tools/advanced_extraction/
