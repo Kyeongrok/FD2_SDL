@@ -48,8 +48,9 @@ typedef struct {
     byte* data;
     dword size;
     int resource_count;
-    dword starts[64];
-    dword ends[64];
+    int max_resources;
+    dword* starts;
+    dword* ends;
 } DatHandle;
 
 // 精灵信息
@@ -340,17 +341,77 @@ typedef struct {
     int fade_level;
     int current_res;
     bool complete;
+    DatHandle figani;  // FIGANI.DAT句柄
 } StartupAnimState;
 
 static StartupAnimState g_startup = {0};
 
-// 从FDOTHER.DAT绘制资源到屏幕 (raw 320x200 bitmap)
+// 加载FIGANI.DAT用于启动动画
+static bool load_figani_dat() {
+    FILE* fp = fopen("FIGANI.DAT", "rb");
+    if (!fp) {
+        printf("[错误] 无法打开FIGANI.DAT\n");
+        return false;
+    }
+    fseek(fp, 0, SEEK_END);
+    g_startup.figani.size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    g_startup.figani.data = (byte*)malloc(g_startup.figani.size);
+    fread(g_startup.figani.data, 1, g_startup.figani.size, fp);
+    fclose(fp);
+    parse_dat_handle(&g_startup.figani);
+    printf("[资源] FIGANI.DAT: %d个资源\n", g_startup.figani.resource_count);
+    return true;
+}
+
+// 从FIGANI.DAT绘制资源到屏幕
+static void draw_figani_resource(int res_idx) {
+    if (!g_startup.figani.data) {
+        printf("[错误] g_startup.figani.data is NULL\n");
+        return;
+    }
+    
+    dword size;
+    byte* data = get_dat_resource(&g_startup.figani, res_idx, &size);
+    if (!data) {
+        printf("[错误] 无法获取FIGANI.DAT资源%d\n", res_idx);
+        return;
+    }
+    
+    // 尝试RLE解压
+    if (size < 64000) {
+        memset(g_render.screen_buffer, 0, 64000);
+        decompress_rle(data, size, g_render.screen_buffer, 320, 200);
+    } else {
+        memcpy(g_render.screen_buffer, data, 64000);
+    }
+}
+
+// 从FDOTHER.DAT绘制资源到屏幕 (可能需要RLE解压)
 static void draw_fdother_resource(int res_idx) {
-    if (!g_resources.fdother.data) return;
+    if (!g_resources.fdother.data) {
+        printf("[错误] g_resources.fdother.data is NULL\n");
+        return;
+    }
+    
     dword size;
     byte* data = get_dat_resource(&g_resources.fdother, res_idx, &size);
-    if (data && size >= 64000) {
+    if (!data) {
+        printf("[错误] 无法获取FDOTHER.DAT资源%d\n", res_idx);
+        return;
+    }
+    
+    printf("[调试] 绘制资源%d, 大小=%d\n", res_idx, size);
+    
+    if (size >= 64000) {
+        // 可能是raw格式，直接复制
         memcpy(g_render.screen_buffer, data, 64000);
+    } else {
+        // RLE压缩格式，需要解压
+        printf("[调试] 资源%d RLE解压 (%d -> 64000)\n", res_idx, size);
+        memset(g_render.screen_buffer, 0, 64000);
+        int decoded = decompress_rle(data, size, g_render.screen_buffer, 320, 200);
+        printf("[调试] 解压结果: %d 字节\n", decoded);
     }
 }
 
@@ -396,9 +457,10 @@ static void draw_bitmap_to_screen(byte* bitmap, int stride, int x, int y, int w,
     }
 }
 
-// 从FDOTHER.DAT加载条形动画数据 (资源69-73, 每个147像素高)
+// 从FIGANI.DAT加载条形动画数据 (资源69-73, 每个147像素高)
 static bool load_bar_animation() {
     if (g_startup.bar_loaded) return true;
+    if (!g_startup.figani.data) return false;
     
     g_startup.bar_data = (byte*)malloc(5 * 147 * 320);
     if (!g_startup.bar_data) return false;
@@ -407,10 +469,22 @@ static bool load_bar_animation() {
     
     for (int i = 0; i < 5; i++) {
         dword size;
-        byte* data = load_fdother_resource(69 + i, &size);
+        byte* data = get_dat_resource(&g_startup.figani, 69 + i, &size);
         if (data && size >= 320 * 147) {
-            memcpy(g_startup.bar_data + i * 147 * 320, data, 147 * 320);
-            free(data);
+            // 尝试RLE解压
+            byte* decoded = (byte*)malloc(320 * 147);
+            if (decoded) {
+                memset(decoded, 0, 320 * 147);
+                decompress_rle(data, size, decoded, 320, 147);
+                memcpy(g_startup.bar_data + i * 147 * 320, decoded, 147 * 320);
+                free(decoded);
+            } else {
+                memcpy(g_startup.bar_data + i * 147 * 320, data, 147 * 320);
+            }
+        } else if (data) {
+            // 直接复制（如果是未压缩的）
+            int copy_size = (size < 147 * 320) ? size : 147 * 320;
+            memcpy(g_startup.bar_data + i * 147 * 320, data, copy_size);
         }
     }
     
@@ -550,16 +624,23 @@ static void run_full_startup_sequence() {
     g_startup.phase = 0;
     g_startup.bar_offset = 535;
     
+    // 首先加载FIGANI.DAT
+    printf("[启动] 加载FIGANI.DAT...\n");
+    if (!load_figani_dat()) {
+        printf("[错误] FIGANI.DAT加载失败\n");
+        return;
+    }
+    
     // ===== Phase 0: 初始设置 =====
-    printf("[启动] Phase 0: 加载资源77\n");
-    draw_fdother_resource(77);
+    printf("[启动] Phase 0: 绘制FIGANI资源77\n");
+    draw_figani_resource(77);
     present();
     delay_ms(100);
     
     // ===== Phase 1: 显示资源74 + ANI动画 =====
-    printf("[启动] Phase 1: 显示资源74 + ANI.DAT资源0\n");
+    printf("[启动] Phase 1: 绘制FIGANI资源74 + ANI.DAT资源0\n");
     clear_screen(0);
-    draw_fdother_resource(74);
+    draw_figani_resource(74);
     present();
     delay_ms(30);
     
@@ -575,16 +656,16 @@ static void run_full_startup_sequence() {
     }
     
     // ===== Phase 2: 资源99 + ANI.DAT资源3 =====
-    printf("[启动] Phase 2: 资源99 + ANI.DAT资源3\n");
+    printf("[启动] Phase 2: 绘制FIGANI资源99 + ANI.DAT资源3\n");
     clear_screen(0);
-    draw_fdother_resource(99);
+    draw_figani_resource(99);
     present();
     delay_ms(100);
     
     play_ani_resource(3, 90, 1);
     
     clear_screen(0);
-    draw_fdother_resource(101);
+    draw_figani_resource(101);
     present();
     delay_ms(100);
     
@@ -597,14 +678,14 @@ static void run_full_startup_sequence() {
         draw_bar_frame(offset);
         
         if (offset == 330 || offset == 210 || offset == 110 || offset == 25) {
-            draw_fdother_resource(102);
+            draw_figani_resource(102);
             present();
             delay_ms(30);
-            draw_fdother_resource(101);
+            draw_figani_resource(101);
         } else if (offset == 450) {
-            draw_fdother_resource(100);
+            draw_figani_resource(100);
         } else if (offset == 10) {
-            draw_fdother_resource(75);
+            draw_figani_resource(75);
         }
         
         present();
@@ -783,7 +864,25 @@ static bool parse_dat_handle(DatHandle* dh) {
     if (!dh->data || dh->size < 6) return false;
     if (memcmp(dh->data, "LLLLLL", 6) != 0) return false;
     
+    // 先计算资源数量
+    int count = 0;
     int offset = 6;
+    while (offset + 8 <= (int)dh->size) {
+        dword s = *(dword*)(dh->data + offset);
+        dword e = *(dword*)(dh->data + offset + 4);
+        if (s >= e || s >= dh->size) break;
+        count++;
+        offset += 8;
+    }
+    
+    // 动态分配
+    dh->max_resources = count;
+    dh->starts = (dword*)malloc(count * sizeof(dword));
+    dh->ends = (dword*)malloc(count * sizeof(dword));
+    if (!dh->starts || !dh->ends) return false;
+    
+    // 再次遍历填充数据
+    offset = 6;
     dh->resource_count = 0;
     while (offset + 8 <= (int)dh->size) {
         dword s = *(dword*)(dh->data + offset);
@@ -793,9 +892,16 @@ static bool parse_dat_handle(DatHandle* dh) {
         dh->ends[dh->resource_count] = e;
         dh->resource_count++;
         offset += 8;
-        if (dh->resource_count >= 64) break;
     }
     return true;
+}
+
+// 释放DatHandle资源
+static void free_dat_handle(DatHandle* dh) {
+    if (dh->starts) free(dh->starts);
+    if (dh->ends) free(dh->ends);
+    if (dh->data) free(dh->data);
+    memset(dh, 0, sizeof(DatHandle));
 }
 
 // 获取DAT资源数据
@@ -1577,11 +1683,12 @@ int main(int argc, char* argv[]) {
     if (g_resources.palette) free(g_resources.palette);
     if (g_resources.sprites_22) free(g_resources.sprites_22);
     if (g_resources.sprites_32) free(g_resources.sprites_32);
-    if (g_resources.fdtxt.data) free(g_resources.fdtxt.data);
+    free_dat_handle(&g_resources.fdother);
+    free_dat_handle(&g_resources.fdfield);
+    free_dat_handle(&g_resources.fdshap);
+    free_dat_handle(&g_resources.fdtxt);
+    free_dat_handle(&g_startup.figani);
     if (g_resources.field_data) free(g_resources.field_data);
-    if (g_resources.fdother.data) free(g_resources.fdother.data);
-    if (g_resources.fdfield.data) free(g_resources.fdfield.data);
-    if (g_resources.fdshap.data) free(g_resources.fdshap.data);
     
 #ifdef USE_SDL
     if (g_sdl_active) {
