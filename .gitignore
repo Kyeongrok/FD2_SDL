@@ -3,6 +3,7 @@ bin/
 *.o
 *.obj
 *.exe
+images
 
 # Editor/IDE
 .vscode/
@@ -27,5 +28,4 @@ data/
 opencode.json
 
 # Extracted assets (generated)
-tools/extracted_images/
-tools/advanced_extraction/
+tools/

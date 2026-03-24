@@ -6,6 +6,10 @@
  * 1993年经典DOS拼图游戏的重现代替品
  */
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #ifdef USE_SDL
 #include "fd2_sdl_renderer.h"
 #endif
@@ -112,15 +116,15 @@ typedef struct {
 // 前向声明
 static bool parse_dat_handle(DatHandle* dh);
 static byte* get_dat_resource(DatHandle* dh, int index, dword* out_size);
-static int decompress_rle(byte* src, dword src_size, byte* dst, int dst_width, int dst_height);
+static int decompress_rle_simple(byte* src, int src_size, byte* dst, int dst_stride);
 static bool load_level(int level);
 static void apply_palette(void);
 static void clear_screen(byte color);
 static void present(void);
 static void delay_ms(uint32_t ms);
-static void run_ani_command(int cmd, byte* data, int pos_in_block, int block_size);
+static int run_ani_command(int cmd, byte* data, int pos_in_block, int block_size);
 static Sprite get_sprite_22(int idx);
-static Sprite get_sprite_32(int idx);
+
 static int load_ani_cached(int resource_index);
 static void update_ani_frame(void);
 
@@ -142,54 +146,119 @@ typedef struct {
 static ANIBlockInfo* g_ani_blocks = NULL;
 static int g_ani_max_blocks = 0;
 
-// ANI命令处理器 - 基于IDA Pro逆向工程 (sub_36E3D/36E57/36E65/36EA7/36EE0/36F08/36F24/36F69/36F82/36FAC)
-static void do_h0(byte* d) { byte b=d[0]; dword v=(b<<16)|(b<<8)|b; dword* p=(dword*)ani_palette_buf; for(int i=0;i<96;i++)p[i]=v; }
-static void do_h1(byte* d, int sz) { if(sz>768)sz=768; memcpy(ani_palette_buf,d,sz); }
-static void do_h2(byte* d, int sz) {
+// ANI命令处理器 - 基于IDA Pro逆向工程
+static int do_h0(byte* d) { byte b=d[0]; dword v=(b<<16)|(b<<8)|b; dword* p=(dword*)ani_palette_buf; for(int i=0;i<96;i++)p[i]=v; return 1; }
+static int do_h1(byte* d, int sz) { if(sz>768)sz=768; for(int i=0;i<sz;i++)ani_palette_buf[i]=d[i]; return sz; }
+static int do_h2(byte* d, int sz) {
     byte* dst=ani_palette_buf; int filled=0,pos=0;
-    while(filled<768&&pos<sz){byte b=d[pos++];if((b&0xC0)==0xC0){int run=b&0x3F;byte v=d[pos++];for(int j=0;j<run&&filled<768&&pos<sz;j++){*dst++=v;filled++;}}else{*dst++=b;filled++;}}
+    while(filled<768&&pos<sz){
+        byte b=d[pos++];
+        if((b&0xC0)==0xC0){
+            int run=b&0x3F;
+            byte v=d[pos++];
+            int count=(run>>1)+(run&1);
+            for(int i=0;i<count&&filled<768;i++){dst[filled++]=v;}
+        }else{
+            dst[filled++]=b;
+        }
+    }
+    return pos;
 }
-static void do_h3(byte* d, int sz) {
-    int pos=0; if(pos>=sz)return;
+static int do_h3(byte* d, int sz) {
+    int pos=0; if(pos>=sz)return 0;
     int count=d[pos++]; byte* dst=ani_palette_buf;
-    for(int i=0;i<count&&pos+4<=sz;i++){int olo=d[pos++],ohi=d[pos++];int off=olo|(ohi<<8);int clo=d[pos++],chi=d[pos++];int cp=clo|(chi<<8);if(off>=0&&cp>0&&off+cp<=768&&pos+cp<=sz){memcpy(dst+off,d+pos,cp);}pos+=cp;}
+    for(int i=0;i<count&&pos+2<=sz;i++){
+        int off=d[pos++];
+        int cp=d[pos++];
+        int actual_off=off*3;
+        int actual_cp=(cp*3)>>1;
+        if(actual_off>=0&&actual_cp>0&&actual_off+actual_cp<=768&&pos+actual_cp<=sz){
+            memcpy(dst+actual_off,d+pos,actual_cp);
+        }
+        pos+=actual_cp;
+    }
+    return pos;
 }
-static void do_h4(byte* d) { byte b=d[0]; dword v=(b<<16)|(b<<8)|b; dword* p=(dword*)ani_screen_buf; for(int i=0;i<10000;i++)p[i]=v; for(int i=40000;i<64000;i++)ani_screen_buf[i]=b; }
-static void do_h5(byte* d) { memcpy(ani_screen_buf,d,64000); }
-static void do_h6(byte* d, int sz) {
+static int do_h4(byte* d) { byte b=d[0]; dword v=(b<<16)|(b<<8)|b; dword* p=(dword*)ani_screen_buf; for(int i=0;i<10000;i++)p[i]=v; for(int i=40000;i<64000;i++)ani_screen_buf[i]=b; return 1; }
+static int do_h5(byte* d) { memcpy(ani_screen_buf,d,64000); return 64000; }
+static int do_h6(byte* d, int sz) {
     byte* dst=ani_screen_buf; int filled=0,pos=0;
-    while(filled<64000&&pos<sz){byte b=d[pos++];if((b&0xC0)==0xC0){int run=b&0x3F;byte v=d[pos++];for(int j=0;j<run&&filled<64000&&pos<sz;j++){*dst++=v;filled++;}}else{*dst++=b;filled++;}}
+    while(filled<64000&&pos<sz){
+        byte b=d[pos++];
+        if((b&0xC0)==0xC0){
+            int run=b&0x3F;
+            byte v=d[pos++];
+            int words=(run>>1);
+            int bytes=run&1;
+            for(int i=0;i<words&&filled<64000;i++){dst[filled++]=v;if(filled<64000)dst[filled++]=v;}
+            for(int i=0;i<bytes&&filled<64000;i++)dst[filled++]=v;
+        }else{
+            dst[filled++]=b;
+        }
+    }
+    return pos;
 }
-static void do_h7(byte* d, int sz) {
-    int pos=0; if(pos+2>sz)return;
-    int lo=d[pos++],hi=d[pos++]; int count=lo|(hi<<8);
-    for(int i=0;i<count&&pos+4<=sz;i++){int olo=d[pos++],ohi=d[pos++];int off=olo|(ohi<<8);int plo=d[pos++],phi=d[pos++];int pi=plo|(phi<<8);if(off>=0&&off<64000)ani_screen_buf[off]=(byte)pi;}
+static int do_h7(byte* d, int sz) {
+    int pos=0; if(pos>=sz)return 0;
+    int count_lo=d[pos++],count_hi=d[pos++];
+    int count=count_lo|(count_hi<<8);
+    for(int i=0;i<count&&pos+3<=sz;i++){
+        int off_lo=d[pos++],off_hi=d[pos++];
+        int run=d[pos++];
+        int val=d[pos++];
+        int off=off_lo|(off_hi<<8);
+        if(off>=0&&off<64000){
+            int words=run>>1;
+            int bytes=run&1;
+            for(int j=0;j<words&&off<64000;j++){
+                ani_screen_buf[off++]=val;
+                if(off<64000)ani_screen_buf[off++]=val;
+            }
+            for(int j=0;j<bytes&&off<64000;j++)ani_screen_buf[off++]=val;
+        }
+    }
+    return pos;
 }
-static void do_h8(byte* d, int sz) {
-    int pos=0; if(pos+2>sz)return;
-    int lo=d[pos++],hi=d[pos++]; int count=lo|(hi<<8);
-    for(int i=0;i<count&&pos+5<=sz;i++){int olo=d[pos++],ohi=d[pos++];int off=olo|(ohi<<8);int slo=d[pos++],shi=d[pos++];int stride=slo|(shi<<8);byte v=d[pos++];for(int j=0;j<stride&&off+j<64000;j++)ani_screen_buf[off+j]=v;}
+static int do_h8(byte* d, int sz) {
+    int pos=0; if(pos>=sz)return 0;
+    int count_lo=d[pos++],count_hi=d[pos++];
+    int count=count_lo|(count_hi<<8);
+    for(int i=0;i<count&&pos+2<=sz;i++){
+        int off_lo=d[pos++],off_hi=d[pos++];
+        int off=off_lo|(off_hi<<8);
+        byte v=d[pos++];
+        if(off>=0&&off<64000)ani_screen_buf[off]=v;
+    }
+    return pos;
 }
-static void do_h9(byte* d, int sz) {
-    int pos=0; if(pos+2>sz)return;
-    int lo=d[pos++],hi=d[pos++]; int count=lo|(hi<<8);
-    for(int i=0;i<count&&pos+4<=sz;i++){int olo=d[pos++],ohi=d[pos++];int off=olo|(ohi<<8);int slo=d[pos++],shi=d[pos++];int stride=slo|(shi<<8);if(off>=0&&stride>0&&off+stride<=64000&&pos+stride<=sz)memcpy(ani_screen_buf+off,d+pos,stride);pos+=stride;}
+static int do_h9(byte* d, int sz) {
+    int pos=0; if(pos>=sz)return 0;
+    int count=d[pos++];
+    for(int i=0;i<count&&pos+4<=sz;i++){
+        int off_lo=d[pos++],off_hi=d[pos++];
+        int stride_lo=d[pos++],stride_hi=d[pos++];
+        int off=off_lo|(off_hi<<8);
+        int stride=stride_lo|(stride_hi<<8);
+        if(off>=0&&stride>0&&off+stride<=64000&&pos+stride<=sz){memcpy(ani_screen_buf+off,d+pos,stride);}
+        pos+=stride;
+    }
+    return pos;
 }
 
-static void run_ani_command(int cmd, byte* data, int pos_in_block, int block_size) {
+static int run_ani_command(int cmd, byte* data, int pos_in_block, int block_size) {
     int remaining = block_size - pos_in_block;
     switch(cmd) {
-        case 0: do_h0(data+pos_in_block); break;
-        case 1: do_h1(data+pos_in_block, remaining); break;
-        case 2: do_h2(data+pos_in_block, remaining); break;
-        case 3: do_h3(data+pos_in_block, remaining); break;
-        case 4: do_h4(data+pos_in_block); break;
-        case 5: do_h5(data+pos_in_block); break;
-        case 6: do_h6(data+pos_in_block, remaining); break;
-        case 7: do_h7(data+pos_in_block, remaining); break;
-        case 8: do_h8(data+pos_in_block, remaining); break;
-        case 9: do_h9(data+pos_in_block, remaining); break;
-        default: break;
+        case 0: return do_h0(data+pos_in_block);
+        case 1: return do_h1(data+pos_in_block, remaining);
+        case 2: return do_h2(data+pos_in_block, remaining);
+        case 3: return do_h3(data+pos_in_block, remaining);
+        case 4: return do_h4(data+pos_in_block);
+        case 5: return do_h5(data+pos_in_block);
+        case 6: return do_h6(data+pos_in_block, remaining);
+        case 7: return do_h7(data+pos_in_block, remaining);
+        case 8: return do_h8(data+pos_in_block, remaining);
+        case 9: return do_h9(data+pos_in_block, remaining);
+        default: return 0;
     }
 }
 
@@ -281,6 +350,7 @@ static int decode_ani_block(int block_index) {
     if (block_index < 0 || block_index >= block_count) { fclose(fp); return -1; }
     
     static byte block_data[64000];
+    int frames_decoded = 0;
     
     for (int i = 0; i < block_count; i++) {
         byte block_header[8];
@@ -289,10 +359,12 @@ static int decode_ani_block(int block_index) {
         word size = *(word*)(block_header + 0);
         word cmd_count = *(word*)(block_header + 2);
         
+        if (fseek(fp, size, SEEK_CUR) != 0) { fclose(fp); return -1; }
+        
         if (size == 0 || cmd_count == 0) continue;
         
-        if (i == block_index) {
-            if (size > 64000) size = 64000;
+        if (frames_decoded == block_index) {
+            fseek(fp, -size, SEEK_CUR);
             if (fread(block_data, 1, size, fp) != (size_t)size) { fclose(fp); return -1; }
             
             memset(ani_screen_buf, 0, 64000);
@@ -302,14 +374,14 @@ static int decode_ani_block(int block_index) {
             for (int c = 0; c < cmd_count && pos < size; c++) {
                 byte cmd = block_data[pos++];
                 if (cmd < 10) {
-                    run_ani_command(cmd, block_data, pos, size);
+                    pos += run_ani_command(cmd, block_data, pos, size);
                 }
             }
             fclose(fp);
             return 1;
         }
         
-        if (fseek(fp, size, SEEK_CUR) != 0) { fclose(fp); return -1; }
+        frames_decoded++;
     }
     
     fclose(fp);
@@ -346,74 +418,10 @@ typedef struct {
 
 static StartupAnimState g_startup = {0};
 
-// 加载FIGANI.DAT用于启动动画
-static bool load_figani_dat() {
-    FILE* fp = fopen("FIGANI.DAT", "rb");
-    if (!fp) {
-        printf("[错误] 无法打开FIGANI.DAT\n");
-        return false;
-    }
-    fseek(fp, 0, SEEK_END);
-    g_startup.figani.size = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-    g_startup.figani.data = (byte*)malloc(g_startup.figani.size);
-    fread(g_startup.figani.data, 1, g_startup.figani.size, fp);
-    fclose(fp);
-    parse_dat_handle(&g_startup.figani);
-    printf("[资源] FIGANI.DAT: %d个资源\n", g_startup.figani.resource_count);
-    return true;
-}
 
-// 从FIGANI.DAT绘制资源到屏幕
-static void draw_figani_resource(int res_idx) {
-    if (!g_startup.figani.data) {
-        printf("[错误] g_startup.figani.data is NULL\n");
-        return;
-    }
-    
-    dword size;
-    byte* data = get_dat_resource(&g_startup.figani, res_idx, &size);
-    if (!data) {
-        printf("[错误] 无法获取FIGANI.DAT资源%d\n", res_idx);
-        return;
-    }
-    
-    // 尝试RLE解压
-    if (size < 64000) {
-        memset(g_render.screen_buffer, 0, 64000);
-        decompress_rle(data, size, g_render.screen_buffer, 320, 200);
-    } else {
-        memcpy(g_render.screen_buffer, data, 64000);
-    }
-}
 
 // 从FDOTHER.DAT绘制资源到屏幕 (可能需要RLE解压)
-static void draw_fdother_resource(int res_idx) {
-    if (!g_resources.fdother.data) {
-        printf("[错误] g_resources.fdother.data is NULL\n");
-        return;
-    }
-    
-    dword size;
-    byte* data = get_dat_resource(&g_resources.fdother, res_idx, &size);
-    if (!data) {
-        printf("[错误] 无法获取FDOTHER.DAT资源%d\n", res_idx);
-        return;
-    }
-    
-    printf("[调试] 绘制资源%d, 大小=%d\n", res_idx, size);
-    
-    if (size >= 64000) {
-        // 可能是raw格式，直接复制
-        memcpy(g_render.screen_buffer, data, 64000);
-    } else {
-        // RLE压缩格式，需要解压
-        printf("[调试] 资源%d RLE解压 (%d -> 64000)\n", res_idx, size);
-        memset(g_render.screen_buffer, 0, 64000);
-        int decoded = decompress_rle(data, size, g_render.screen_buffer, 320, 200);
-        printf("[调试] 解压结果: %d 字节\n", decoded);
-    }
-}
+
 
 // 设置游戏调色板 (从FDOTHER.DAT资源获取)
 static void set_game_palette(int res_idx) {
@@ -423,88 +431,6 @@ static void set_game_palette(int res_idx) {
     if (pal && size >= 768) {
         memcpy(g_resources.palette, pal, 768);
         apply_palette();
-    }
-}
-
-// 加载FDOTHER.DAT资源数据
-static byte* load_fdother_resource(int res_idx, dword* out_size) {
-    if (!g_resources.fdother.data) return NULL;
-    dword size;
-    byte* data = get_dat_resource(&g_resources.fdother, res_idx, &size);
-    if (data && out_size) {
-        *out_size = size;
-        byte* copy = (byte*)malloc(size);
-        if (copy) memcpy(copy, data, size);
-        return copy;
-    }
-    return NULL;
-}
-
-// 绘制内存中的320x200位图到屏幕
-static void draw_bitmap_to_screen(byte* bitmap, int stride, int x, int y, int w, int h) {
-    if (!bitmap) return;
-    for (int dy = 0; dy < h; dy++) {
-        int src_y = dy;
-        int dst_y = y + dy;
-        if (dst_y < 0 || dst_y >= SCREEN_HEIGHT) continue;
-        for (int dx = 0; dx < w; dx++) {
-            int src_x = dx;
-            int dst_x = x + dx;
-            if (dst_x < 0 || dst_x >= SCREEN_WIDTH) continue;
-            byte color = bitmap[src_y * stride + src_x];
-            g_render.screen_buffer[dst_y * SCREEN_WIDTH + dst_x] = color;
-        }
-    }
-}
-
-// 从FIGANI.DAT加载条形动画数据 (资源69-73, 每个147像素高)
-static bool load_bar_animation() {
-    if (g_startup.bar_loaded) return true;
-    if (!g_startup.figani.data) return false;
-    
-    g_startup.bar_data = (byte*)malloc(5 * 147 * 320);
-    if (!g_startup.bar_data) return false;
-    
-    memset(g_startup.bar_data, 0, 5 * 147 * 320);
-    
-    for (int i = 0; i < 5; i++) {
-        dword size;
-        byte* data = get_dat_resource(&g_startup.figani, 69 + i, &size);
-        if (data && size >= 320 * 147) {
-            // 尝试RLE解压
-            byte* decoded = (byte*)malloc(320 * 147);
-            if (decoded) {
-                memset(decoded, 0, 320 * 147);
-                decompress_rle(data, size, decoded, 320, 147);
-                memcpy(g_startup.bar_data + i * 147 * 320, decoded, 147 * 320);
-                free(decoded);
-            } else {
-                memcpy(g_startup.bar_data + i * 147 * 320, data, 147 * 320);
-            }
-        } else if (data) {
-            // 直接复制（如果是未压缩的）
-            int copy_size = (size < 147 * 320) ? size : 147 * 320;
-            memcpy(g_startup.bar_data + i * 147 * 320, data, copy_size);
-        }
-    }
-    
-    g_startup.bar_loaded = 1;
-    return true;
-}
-
-// 绘制条形动画帧
-static void draw_bar_frame(int offset) {
-    if (!g_startup.bar_data) return;
-    
-    int src_y = offset;
-    int dst_y = 0;
-    
-    while (src_y < 5 * 147 && dst_y < SCREEN_HEIGHT) {
-        byte* src_row = g_startup.bar_data + src_y * 320;
-        byte* dst_row = g_render.screen_buffer + dst_y * SCREEN_WIDTH;
-        memcpy(dst_row, src_row, 320);
-        src_y++;
-        dst_y++;
     }
 }
 
@@ -550,7 +476,7 @@ static int play_ani_resource(int res_idx, int frame_delay, int wait_key) {
         for (int c = 0; c < cmd_count && pos < size; c++) {
             byte cmd = block_data[pos++];
             if (cmd < 10) {
-                run_ani_command(cmd, block_data, pos, size);
+                pos += run_ani_command(cmd, block_data, pos, size);
             }
         }
         
@@ -583,29 +509,7 @@ static int play_ani_resource(int res_idx, int frame_delay, int wait_key) {
     return 0;
 }
 
-// 简单启动动画 (对应sub_1F81E)
-static void simple_startup_animation(int res_idx, int delay_ms, int res_other) {
-    if (res_other != -1) {
-        clear_screen(0);
-        draw_fdother_resource(res_other);
-    }
-    play_ani_resource(res_idx, delay_ms, 0);
-}
 
-// 加载并显示FDOTHER资源动画 (对应sub_1F73F)
-static void load_show_fdother(int n5, int n100, int dst_y) {
-    clear_screen(0);
-    draw_fdother_resource(n5);
-    
-    dword size;
-    byte* data = load_fdother_resource(n100, &size);
-    if (data && size >= 64000) {
-        draw_bitmap_to_screen(data, 320, 0, 0, 320, 200);
-        free(data);
-    }
-    
-    draw_bar_frame(dst_y);
-}
 
 // 淡入淡出效果
 static void fade_effect(int start, int end, int frame_delay) {
@@ -616,89 +520,147 @@ static void fade_effect(int start, int end, int frame_delay) {
     g_startup.fade_level = end;
 }
 
+// 解压FDOTHER.DAT资源到屏幕缓冲区 (320x200)
+static void decompress_to_screen(int res_idx) {
+    dword size;
+    byte* data = get_dat_resource(&g_resources.fdother, res_idx, &size);
+    if (!data) return;
+    
+    // 使用RLE解压函数 - 它会自动读取header中的count和stride
+    memset(g_render.screen_buffer, 0, 64000);
+    decompress_rle_simple(data, size, g_render.screen_buffer, 320);
+}
+
+// 设置调色板 (从FDOTHER.DAT资源加载256色调色板)
+static void set_palette(int res_idx) {
+    dword size;
+    byte* pal = get_dat_resource(&g_resources.fdother, res_idx, &size);
+    if (pal && size >= 768) {
+        memcpy(g_resources.palette, pal, 768);
+        apply_palette();
+        printf("[调色板] 已设置 (资源%d, %d字节)\n", res_idx, size);
+    } else {
+        printf("[调色板] 警告: 资源%d大小=%d\n", res_idx, size ? size : 0);
+    }
+}
+
 // 完整的启动序列
 static void run_full_startup_sequence() {
     printf("[启动] 开始完整启动序列...\n");
     
     memset(&g_startup, 0, sizeof(StartupAnimState));
-    g_startup.phase = 0;
-    g_startup.bar_offset = 535;
     
-    // 首先加载FIGANI.DAT
-    printf("[启动] 加载FIGANI.DAT...\n");
-    if (!load_figani_dat()) {
-        printf("[错误] FIGANI.DAT加载失败\n");
-        return;
-    }
-    
-    // ===== Phase 0: 初始设置 =====
-    printf("[启动] Phase 0: 绘制FIGANI资源77\n");
-    draw_figani_resource(77);
+    // ===== Phase 0: 加载调色板 =====
+    // 资源102是真正的调色板 (768字节, 6-bit值)
+    printf("[启动] Phase 0: 加载调色板 (资源102)\n");
+    set_palette(102);
+    apply_palette();
     present();
     delay_ms(100);
     
     // ===== Phase 1: 显示资源74 + ANI动画 =====
-    printf("[启动] Phase 1: 绘制FIGANI资源74 + ANI.DAT资源0\n");
+    printf("[启动] Phase 1: 绘制FDOTHER资源74 + ANI.DAT资源0\n");
     clear_screen(0);
-    draw_figani_resource(74);
+    decompress_to_screen(74);
     present();
     delay_ms(30);
     
+    // 播放ANI动画
     g_ani_res_idx = 0;
-    load_ani_cached(0);
-    g_ani_frame = 0;
-    for (int i = 0; i < 31 && g_ani_frame < g_ani_block_count; i++) {
-        update_ani_frame();
-        memcpy(g_render.screen_buffer, ani_screen_buf, 64000);
-        present();
-        delay_ms(60);
-        g_ani_frame++;
+    if (load_ani_cached(0) == 0 && g_ani_block_count > 0) {
+        printf("[启动] 播放ANI动画: %d帧\n", g_ani_block_count);
+        for (int i = 0; i < 30 && i < g_ani_block_count; i++) {
+            if (decode_ani_block(i) > 0) {
+                memcpy(g_render.screen_buffer, ani_screen_buf, 64000);
+                present();
+                delay_ms(80);
+            }
+        }
     }
     
     // ===== Phase 2: 资源99 + ANI.DAT资源3 =====
-    printf("[启动] Phase 2: 绘制FIGANI资源99 + ANI.DAT资源3\n");
+    printf("[启动] Phase 2: 绘制FDOTHER资源99 + ANI.DAT资源3\n");
     clear_screen(0);
-    draw_figani_resource(99);
+    set_palette(99);
     present();
     delay_ms(100);
     
     play_ani_resource(3, 90, 1);
     
     clear_screen(0);
-    draw_figani_resource(101);
+    set_palette(101);
     present();
     delay_ms(100);
     
     // ===== Phase 3: 条形动画 =====
     printf("[启动] Phase 3: 条形动画 (535帧)\n");
-    load_bar_animation();
     
+    // 分配条形动画缓冲区
+    byte* bar_buf = (byte*)malloc(5 * 147 * 320);
+    if (!bar_buf) { printf("[错误] bar_buf分配失败\n"); return; }
+    memset(bar_buf, 0, 5 * 147 * 320);
+    printf("[启动] bar_buf分配成功: %d字节\n", 5 * 147 * 320);
+    
+    // 加载条形帧 (FDOTHER资源69-73)
+    for (int i = 0; i < 5; i++) {
+        dword size;
+        byte* data = get_dat_resource(&g_resources.fdother, 69 + i, &size);
+        if (data) {
+            printf("[启动] 解压条形帧%d: 大小=%d\n", i, size);
+            byte* decoded = (byte*)malloc(320 * 200);  // Use full screen height
+            if (decoded) {
+                memset(decoded, 0, 320 * 200);
+                decompress_rle_simple(data, size, decoded, 320);
+                memcpy(bar_buf + i * 147 * 320, decoded, 147 * 320);
+                // Debug: check first few bytes
+                printf("[启动] bar_buf[%d]前16字节: %02x %02x %02x %02x...\n", 
+                       i * 147 * 320, bar_buf[i * 147 * 320], bar_buf[i * 147 * 320 + 1],
+                       bar_buf[i * 147 * 320 + 2], bar_buf[i * 147 * 320 + 3]);
+                free(decoded);
+            } else {
+                printf("[错误] decoded分配失败\n");
+            }
+        } else {
+            printf("[错误] 无法获取条形帧%d\n", i);
+        }
+    }
+    
+    // 条形动画循环 (从offset=535开始，逐渐向上滚动)
+    printf("[启动] 开始条形动画循环\n");
     for (int offset = 535; offset >= 0; offset--) {
         clear_screen(0);
-        draw_bar_frame(offset);
         
+        // 绘制条形 - 从offset开始复制200行到屏幕顶部
+        int src_y = offset;
+        int dst_y = 0;
+        while (src_y < 5 * 147 && dst_y < SCREEN_HEIGHT) {
+            byte* src_row = bar_buf + src_y * SCREEN_WIDTH;
+            byte* dst_row = g_render.screen_buffer + dst_y * SCREEN_WIDTH;
+            memcpy(dst_row, src_row, SCREEN_WIDTH);
+            src_y++;
+            dst_y++;
+        }
+        
+        // 在特定帧切换调色板（根据IDA分析）
         if (offset == 330 || offset == 210 || offset == 110 || offset == 25) {
-            draw_figani_resource(102);
+            set_palette(102);
             present();
             delay_ms(30);
-            draw_figani_resource(101);
+            set_palette(101);
         } else if (offset == 450) {
-            draw_figani_resource(100);
+            decompress_to_screen(100);
         } else if (offset == 10) {
-            draw_figani_resource(75);
+            decompress_to_screen(75);
         }
         
         present();
-        delay_ms(30);
-        
-        if (offset == 0) {
-            delay_ms(1000);
-        }
+        delay_ms(16);  // ~60fps
         
 #ifdef USE_SDL
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) {
+                free(bar_buf);
                 g_startup.complete = true;
                 return;
             }
@@ -706,11 +668,7 @@ static void run_full_startup_sequence() {
 #endif
     }
     
-    if (g_startup.bar_data) {
-        free(g_startup.bar_data);
-        g_startup.bar_data = NULL;
-        g_startup.bar_loaded = 0;
-    }
+    printf("[启动] 条形动画循环完成\n");
     
     // ===== Phase 4: 淡出 =====
     printf("[启动] Phase 4: 淡出效果\n");
@@ -720,15 +678,15 @@ static void run_full_startup_sequence() {
     // ===== Phase 5: 关卡选择 =====
     printf("[启动] Phase 5: 关卡选择画面\n");
     clear_screen(0);
-    draw_fdother_resource(7);
-    draw_fdother_resource(8);
+    set_palette(7);
+    decompress_to_screen(8);
     present();
     delay_ms(100);
     
     play_ani_resource(1, 15, 1);
     
     clear_screen(0);
-    draw_fdother_resource(7);
+    decompress_to_screen(7);
     set_game_palette(101);
     present();
     
@@ -859,21 +817,47 @@ static bool load_resources() {
     return true;
 }
 
-// 解析DAT文件的资源表
+// 解析DAT文件的资源表 (支持4字节和8字节两种格式)
 static bool parse_dat_handle(DatHandle* dh) {
     if (!dh->data || dh->size < 6) return false;
     if (memcmp(dh->data, "LLLLLL", 6) != 0) return false;
     
-    // 先计算资源数量
-    int count = 0;
-    int offset = 6;
-    while (offset + 8 <= (int)dh->size) {
-        dword s = *(dword*)(dh->data + offset);
-        dword e = *(dword*)(dh->data + offset + 4);
-        if (s >= e || s >= dh->size) break;
-        count++;
-        offset += 8;
+    // 尝试4字节格式: 每个条目4字节,计算下一个偏移作为结束位置
+    int count4 = 0;
+    int offset4 = 6;
+    while (offset4 + 4 <= (int)dh->size) {
+        dword s = *(dword*)(dh->data + offset4);
+        if (s >= dh->size) break;
+        count4++;
+        offset4 += 4;
     }
+    
+    // 尝试8字节格式: 每个条目8字节 [offset][end_offset]
+    int count8 = 0;
+    int offset8 = 6;
+    while (offset8 + 8 <= (int)dh->size) {
+        dword s = *(dword*)(dh->data + offset8);
+        dword e = *(dword*)(dh->data + offset8 + 4);
+        if (s >= dh->size) break;
+        // 结束位置必须大于起始位置
+        if (e <= s) { offset8 += 8; continue; }
+        count8++;
+        offset8 += 8;
+    }
+    
+    // 优先选择8字节格式,因为原始代码使用 fseek(fp, 4*index+6) 读8字节
+    int count = count8;
+    int entry_size = 8;
+    
+    // 如果8字节格式条目数太少或4字节格式条目数更合理，使用4字节格式
+    // FDOTHER.DAT: 4字节格式有103条目，比8字节格式更合理
+    if (count4 > count8) {
+        count = count4;
+        entry_size = 4;
+    }
+    
+    printf("[调试] DAT解析: 8字节格式=%d个资源, 4字节格式=%d个资源, 选择=%d(每条%d字节)\n", 
+           count8, count4, count, entry_size);
     
     // 动态分配
     dh->max_resources = count;
@@ -881,18 +865,46 @@ static bool parse_dat_handle(DatHandle* dh) {
     dh->ends = (dword*)malloc(count * sizeof(dword));
     if (!dh->starts || !dh->ends) return false;
     
-    // 再次遍历填充数据
-    offset = 6;
+    // 填充数据 - 重新计算entry_size
+    int fill_entry_size = entry_size;
+    
     dh->resource_count = 0;
-    while (offset + 8 <= (int)dh->size) {
-        dword s = *(dword*)(dh->data + offset);
-        dword e = *(dword*)(dh->data + offset + 4);
-        if (s >= e || s >= dh->size) break;
-        dh->starts[dh->resource_count] = s;
-        dh->ends[dh->resource_count] = e;
-        dh->resource_count++;
-        offset += 8;
+    int fill_pos = 6;
+    
+    if (fill_entry_size == 8) {
+        // 8字节格式: [offset][size]
+        while (fill_pos + 8 <= (int)dh->size && dh->resource_count < count) {
+            dword s = *(dword*)(dh->data + fill_pos);
+            dword e = *(dword*)(dh->data + fill_pos + 4);
+            if (s >= dh->size) break;
+            if (e <= s) { fill_pos += 8; continue; }
+            dh->starts[dh->resource_count] = s;
+            dh->ends[dh->resource_count] = e;
+            dh->resource_count++;
+            fill_pos += 8;
+        }
+    } else {
+        // 4字节格式: 只有offset,需要计算下一个offset作为end
+        while (fill_pos + 4 <= (int)dh->size && dh->resource_count < count) {
+            dword s = *(dword*)(dh->data + fill_pos);
+            dh->starts[dh->resource_count] = s;
+            
+            // 查找下一个偏移
+            int next_pos = fill_pos + 4;
+            dword next_s = 0;
+            if (next_pos + 4 <= (int)dh->size) {
+                next_s = *(dword*)(dh->data + next_pos);
+            } else {
+                next_s = dh->size;
+            }
+            dh->ends[dh->resource_count] = next_s;
+            
+            if (s >= dh->size) break;
+            dh->resource_count++;
+            fill_pos += 4;
+        }
     }
+    
     return true;
 }
 
@@ -911,59 +923,66 @@ static byte* get_dat_resource(DatHandle* dh, int index, dword* out_size) {
     return dh->data + dh->starts[index];
 }
 
-// RLE解压函数 - 基于IDA Pro分析的sub_4E98D
-// 格式: 如果字节高2位是11(b&0xC0==0xC0), 则(b&0x3F)+1是重复次数,下一字节是值
-// 否则 (b&0x3F)+1 是字面复制长度
-static int decompress_rle(byte* src, dword src_size, byte* dst, int dst_width, int dst_height) {
-    byte* src_end = src + src_size;
-    int row = 0;
-    int col = 0;
-    
-    while (row < dst_height && src < src_end) {
-        byte b = *src++;
-        byte hi = b & 0xC0;
-        
-        if (hi == 0xC0) {
-            int count = (b & 0x3F) + 1;
-            if (src >= src_end) break;
-            byte val = *src++;
-            for (int i = 0; i < count && col < dst_width; i++) {
-                dst[row * dst_width + col++] = val;
-            }
-        } else if (hi == 0x80) {
-            int count = (b & 0x3F) + 1;
-            if (src >= src_end) break;
-            byte val = *src++;
-            for (int i = 0; i < count && col < dst_width; i++) {
-                dst[row * dst_width + col++] = val;
-            }
-        } else if (hi == 0x40) {
-            int count = (b & 0x3F) + 1;
-            for (int i = 0; i < count && col < dst_width; i++) {
-                if (src >= src_end) break;
-                dst[row * dst_width + col++] = *src++;
-            }
-        } else {
-            int count = (b & 0x3F) + 1;
-            for (int i = 0; i < count && col < dst_width; i++) {
-                if (src >= src_end) break;
-                dst[row * dst_width + col++] = *src++;
-            }
-        }
-        
-        if (col >= dst_width) {
-            col = 0;
-            row++;
-        }
+// RLE解压函数 - 基于IDA Pro sub_4E98D分析
+static int decompress_rle_simple(byte* src, int src_size, byte* dst, int dst_stride) {
+    if (src_size < 4) {
+        memcpy(dst, src, src_size);
+        return src_size;
     }
     
-    // Fill remaining rows with 0
-    while (row < dst_height) {
-        memset(dst + row * dst_width, 0, dst_width);
-        row++;
+    unsigned short count = *(unsigned short*)src;      // 行字节数
+    unsigned short num_rows = *(unsigned short*)(src + 2); // 迭代次数
+    
+    src += 4;
+    int src_left = src_size - 4;
+    int row_gap = dst_stride - count;
+    
+    // 外层循环: 执行num_rows次(不是dst_height!)
+    for (int row_iter = num_rows; row_iter > 0; row_iter--) {
+        unsigned short remaining = count;
+        
+        while (remaining > 0 && src_left > 0) {
+            unsigned char val = *src++;
+            src_left--;
+            
+            unsigned int num = (val & 0x3F) + 1;
+            if (num > remaining) num = remaining;
+            
+            if ((val & 0x80) == 0) {
+                // 00xxxxxx: 复制num字节从src
+                if (src_left >= (int)num) {
+                    memcpy(dst, src, num);
+                    src += num;
+                    src_left -= num;
+                    dst += num;
+                }
+            } else if ((val & 0x40) == 0) {
+                // 01xxxxxx: 填充num字节(0)
+                memset(dst, 0, num);
+                dst += num;
+            } else if ((val & 0x20) == 0) {
+                // 10xxxxxx: 复制num字节(单字节循环)
+                for (unsigned int i = 0; i < num; i++) {
+                    *dst++ = *src++;
+                    src_left--;
+                }
+            } else {
+                // 11xxxxxx: 填充num字节, remaining递减2倍!
+                byte fill = *src++;
+                src_left--;
+                remaining -= num * 2;
+                for (unsigned int i = 0; i < num; i++) {
+                    *dst++ = fill;
+                }
+                continue; // 不要执行后面的remaining -= num
+            }
+            remaining -= num;
+        }
+        
+        dst += row_gap;
     }
     
-    return row;
+    return 0;
 }
 
 // 加载指定关卡的数据
@@ -989,8 +1008,8 @@ static bool load_level(int level) {
         
         // 解压场地数据
         printf("[关卡] 场地尺寸: %dx%d\n", g_resources.field_width, g_resources.field_height);
-        decompress_rle(fld_res + 4, fld_size - 4, g_resources.field_data, 
-                       g_resources.field_width, g_resources.field_height);
+        decompress_rle_simple(fld_res + 4, fld_size - 4, g_resources.field_data, 
+                       g_resources.field_width);
     }
     
     // 加载FDFIELD资源1 - 关卡头信息
@@ -1023,14 +1042,7 @@ static Sprite get_sprite_22(int index) {
     return s;
 }
 
-// 获取32x32精灵
-static Sprite get_sprite_32(int index) {
-    Sprite s = {32, 32, NULL, 1024};
-    if (index >= 0 && index < g_resources.sprite_count_32 && g_resources.sprites_32) {
-        s.data = g_resources.sprites_32 + index * 1024;
-    }
-    return s;
-}
+
 
 // 设置调色板到渲染器
 static void apply_palette() {
@@ -1079,26 +1091,7 @@ static void draw_sprite(int x, int y, Sprite sprite, byte transparent_color) {
     }
 }
 
-// 绘制精灵并支持缩放
-static void draw_sprite_scaled(int x, int y, Sprite sprite, byte transparent_color, int scale) {
-    if (!sprite.data) return;
-    for (int dy = 0; dy < sprite.height; dy++) {
-        for (int sy = 0; sy < scale; sy++) {
-            for (int dx = 0; dx < sprite.width; dx++) {
-                byte color = sprite.data[dy * sprite.width + dx];
-                if (color != transparent_color) {
-                    for (int sx = 0; sx < scale; sx++) {
-                        int px = x + dx * scale + sx;
-                        int py = y + dy * scale + sy;
-                        if (px >= 0 && px < SCREEN_WIDTH && py >= 0 && py < SCREEN_HEIGHT) {
-                            g_render.screen_buffer[py * SCREEN_WIDTH + px] = color;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+
 
 // 绘制矩形
 static void draw_rect(int x, int y, int w, int h, byte color) {
@@ -1115,6 +1108,7 @@ static void draw_rect(int x, int y, int w, int h, byte color) {
 
 // 绘制文字（简单的位图字体）
 static void draw_text(int x, int y, const char* text, byte color) {
+    (void)color;
     int cx = x;
     while (*text) {
         unsigned char ch = (unsigned char)*text;
@@ -1130,12 +1124,7 @@ static void draw_text(int x, int y, const char* text, byte color) {
     }
 }
 
-// 绘制帧号数字
-static void draw_number(int x, int y, int num, byte color) {
-    char buf[32];
-    sprintf(buf, "%d", num);
-    draw_text(x, y, buf, color);
-}
+
 
 // 绘制选关屏幕
 static void draw_level_select() {
@@ -1286,34 +1275,7 @@ static void draw_game_screen() {
     draw_text(4, SCREEN_HEIGHT - 15, "ARROWS:MOVE SPACE:SELECT R:ROTATE P:PAUSE Q:QUIT", 255);
 }
 
-// 绘制标题画面
-static void draw_title_screen() {
-    clear_screen(0);
-    
-    // 绘制大标题
-    draw_text(80, 30, "PUZZLE BEAUTY", 220);
-    
-    // 绘制装饰精灵
-    int sprite_y = 70;
-    for (int i = 0; i < 10; i++) {
-        int sprite_idx = (i + g_machine.frame_count / 5) % g_resources.sprite_count_22;
-        Sprite s = get_sprite_22(sprite_idx);
-        draw_sprite(20 + i * 30, sprite_y, s, 0);
-    }
-    
-    // 绘制版本信息
-    draw_text(230, 180, "FD2 REIMPL V1.0", 100);
-    
-    // 绘制操作提示
-    draw_text(80, 120, "ARROWS:MOVE", 150);
-    draw_text(80, 140, "SPACE:SELECT", 150);
-    draw_text(80, 160, "ENTER:START", 150);
-    
-    // 绘制闪烁提示
-    if (g_machine.frame_count % 40 < 20) {
-        draw_text(100, 100, "PRESS ENTER TO START", 255);
-    }
-}
+
 
 // 绘制胜利画面
 static void draw_win_screen() {
@@ -1556,7 +1518,7 @@ static void delay_ms(uint32_t ms) {
 #endif
     {
         clock_t start = clock();
-        while ((clock() - start) * 1000 / CLOCKS_PER_SEC < ms) {}
+        while ((unsigned long)((clock() - start) * 1000 / CLOCKS_PER_SEC) < ms) {}
     }
 }
 
@@ -1612,9 +1574,38 @@ static int game_loop() {
     return 0;
 }
 
+// 设置控制台输出编码为UTF-8
+static void init_console_utf8(void) {
+#ifdef _WIN32
+    // 设置控制台代码页为UTF-8 (65001)
+    SetConsoleOutputCP(650001);
+    // 设置控制台代码页为UTF-8
+    SetConsoleCP(650001);
+    
+    // 尝试启用VT100转义序列支持 (Windows 10+)
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hOut != INVALID_HANDLE_VALUE) {
+        DWORD dwMode = 0;
+        if (GetConsoleMode(hOut, &dwMode)) {
+            dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+            SetConsoleMode(hOut, dwMode);
+        }
+    }
+#endif
+}
+
 // 主函数
 int main(int argc, char* argv[]) {
-    (void)argc; (void)argv;
+    // 初始化控制台UTF-8编码
+    init_console_utf8();
+    
+    bool skip_startup = false;
+    
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--skip") == 0) {
+            skip_startup = true;
+        }
+    }
     
     printf("============================================\n");
     printf("  FD2.exe 重新实现 - Puzzle Beauty\n");
@@ -1622,16 +1613,11 @@ int main(int argc, char* argv[]) {
     printf("============================================\n\n");
     
     // 初始化游戏状态机
-    printf("1\n"); fflush(stdout);
     init_game_machine(&g_machine);
-    printf("2\n"); fflush(stdout);
     memset(&g_render, 0, sizeof(RenderState));
-    printf("3\n"); fflush(stdout);
     memset(&g_resources, 0, sizeof(ResourceCache));
-    printf("4\n"); fflush(stdout);
     
 #ifdef USE_SDL
-    printf("[SDL] about to init\n"); fflush(stdout);
     if (fd2_sdl_init_renderer()) {
         g_sdl_active = true;
         printf("[SDL] SDL2渲染系统已启用\n");
@@ -1656,8 +1642,13 @@ int main(int argc, char* argv[]) {
            g_resources.sprite_count_22, g_resources.sprite_count_32);
     
     // 运行完整的启动动画序列
-    printf("\n[游戏] 运行完整启动序列...\n");
-    run_full_startup_sequence();
+    if (skip_startup) {
+        printf("\n[游戏] 跳过启动动画\n");
+        g_startup.complete = true;
+    } else {
+        printf("\n[游戏] 运行完整启动序列...\n");
+        run_full_startup_sequence();
+    }
     
     // 加载ANI动画数据用于游戏内动画
     printf("[游戏] 加载ANI动画...\n");
@@ -1668,12 +1659,8 @@ int main(int argc, char* argv[]) {
     printf("[游戏] ANI动画: %d帧\n", g_ani_block_count);
     
     // 预加载第一帧
-    printf("[游戏] calling update_ani_frame\n"); fflush(stdout);
     memset(ani_screen_buf, 0, 64000);
     update_ani_frame();
-    printf("[游戏] update_ani_frame done\n"); fflush(stdout);
-    
-    printf("[游戏] calling game_loop\n"); fflush(stdout);
     
     // 运行游戏
     game_loop();
