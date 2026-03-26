@@ -1,4 +1,4 @@
-#include "fd2_rle.h"
+#include "../include/fd2_rle.h"
 #include <string.h>
 
 /**
@@ -91,6 +91,115 @@ int fd2_decode_fdother_resource(byte* src, int src_size, byte* dst, int width, i
         }
         
         num2++;
+    }
+    
+    return 0;
+}
+
+/**
+ * Decompress BG.DAT battle background images.
+ * 
+ * This implements the RLE algorithm from IDA sub_4E98D (makeBgBMP).
+ * 
+ * The algorithm uses a flag-based state machine:
+ * - When flag=0: Read a command byte and set up parameters
+ * - When flag=1: Draw pixels using the current parameters
+ * 
+ * Command byte interpretation:
+ *   b >= 192 (11xxxxxx): Skip mode - advance dst by (b & 0x3F) + 1
+ *   128-191 (10xxxxxx):  Fill mode - set cmd_count, draw (b & 0x3F) + 1 pixels
+ *   64-127 (01xxxxxx):   Copy mode - set cmd_count=1, draw_count=(b & 0x3F)
+ *   0-63 (00xxxxxx):     Fill mode - set cmd_count=1, draw_count=b
+ * 
+ * In draw mode, the next byte in the stream (at current src position) is used
+ * as the color index for the pixels being drawn.
+ */
+int fd2_decode_bg_resource(byte* src, int length, byte* palette, byte* dst, int stride) {
+    if (!src || !dst || length < 4) {
+        return -1;
+    }
+    
+    // Read width and height from header
+    int16_t width = (int16_t)(src[0] | (src[1] << 8));
+    int16_t height = (int16_t)(src[2] | (src[3] << 8));
+    
+    if (width <= 0 || height <= 0) {
+        return -1;
+    }
+    
+    int src_pos = 4;  // Start after header
+    int src_end = length - 1;
+    
+    int num7 = 0;  // skip count
+    int num8 = 0;  // cmd/repeat count
+    int num9 = 0;  // draw count
+    byte b = 0;    // current command byte
+    int x = 0;     // current x position
+    int y = 0;     // current y position
+    
+    while (src_pos <= src_end && y < height) {
+        int flag = (num8 != 0);
+        
+        if (!flag) {
+            // Read new command byte
+            num7 = 0;
+            num8 = 0;
+            num9 = 0;
+            
+            if (src_pos < length) {
+                b = src[src_pos];
+                
+                if (b >= 192) {
+                    num7 = b - 192 + 1;
+                }
+                if (b >= 128 && b < 192) {
+                    num8 = b - 128 + 1;
+                }
+                if (b >= 64 && b < 128) {
+                    num9 = b - 64;
+                    num8 = 1;
+                }
+                if (b < 64) {
+                    num8 = 1;
+                    num9 = b;
+                }
+            }
+            
+            x += num7;
+            if (x >= width) {
+                x = 0;
+                y++;
+                flag = 0;
+            }
+        } else {
+            // Draw mode
+            int count = num9;
+            
+            for (int i = 0; i <= count; i++) {
+                // Extra x increment for copy mode (64-127)
+                if (b >= 64 && b < 128) {
+                    x++;
+                }
+                
+                // Get color index from current src position
+                if (src_pos < length) {
+                    byte color_idx = src[src_pos];
+                    if (x >= 0 && x < width && y >= 0 && y < height) {
+                        dst[y * stride + x] = color_idx;
+                    }
+                }
+                
+                x++;
+                if (x >= width) {
+                    x = 0;
+                    y++;
+                    if (y >= height) break;
+                }
+            }
+            num8--;
+        }
+        
+        src_pos++;
     }
     
     return 0;

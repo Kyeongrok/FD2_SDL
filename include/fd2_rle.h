@@ -22,6 +22,26 @@ typedef uint16_t word;
  */
 int fd2_decode_fdother_resource(byte* src, int src_size, byte* dst, int width, int height);
 
+/**
+ * Decompress BG.DAT battle background images.
+ * 
+ * Algorithm matches IDA function sub_4E98D and base_parser.py makeBgBMP.
+ * 
+ * RLE command byte format:
+ *   b >= 192:       Skip (b - 192 + 1) pixels (transparent)
+ *   128 <= b < 192: Fill (b - 128 + 1) pixels with next byte value
+ *   64 <= b < 128:  Copy (b - 64 + 1) bytes from source
+ *   b < 64:         Fill (b + 1) pixels with next byte value
+ * 
+ * @param src      Source data pointer (includes 4-byte width/height header)
+ * @param length   Length of source data
+ * @param palette  256-color palette (RGB format, 768 bytes)
+ * @param dst      Destination buffer (for pixel indices, width * height bytes)
+ * @param stride   Destination stride (line width in bytes)
+ * @return 0 on success, -1 on error
+ */
+int fd2_decode_bg_resource(byte* src, int length, byte* palette, byte* dst, int stride);
+
 #ifdef __cplusplus
 }
 #endif
