@@ -73,12 +73,16 @@ def parse_index_table(dat_data: bytes) -> List[int]:
     return offsets
 
 
-def decompress_bg(compressed_data: bytes, width: int, height: int) -> bytes:
+def decompress_bg(
+    dat_data: bytes, start_offset: int, length: int, width: int, height: int
+) -> bytes:
     """
-    Decompress BG image data using the RLE algorithm.
+    Decompress BG image data using the RLE algorithm (matches base_parser.py).
 
     Args:
-        compressed_data: Raw image data including 4-byte header
+        dat_data: Full BG.DAT file content
+        start_offset: Start offset of the image (including 4-byte header)
+        length: Length of the image data (end - start)
         width: Image width (from header)
         height: Image height (from header)
 
@@ -87,8 +91,8 @@ def decompress_bg(compressed_data: bytes, width: int, height: int) -> bytes:
     """
     dst = bytearray(width * height)
 
-    src_pos = 4  # Skip header
-    src_end = len(compressed_data) - 1
+    num4 = start_offset + 4  # Skip 4-byte header
+    num3 = start_offset + length - 1
 
     num7 = 0  # skip count
     num8 = 0  # cmd/repeat count
@@ -96,8 +100,9 @@ def decompress_bg(compressed_data: bytes, width: int, height: int) -> bytes:
     b = 0  # current command byte
     x = 0  # current x position
     y = 0  # current y position
+    flag = False
 
-    while src_pos <= src_end and y < height:
+    while num4 <= num3:
         flag = num8 != 0
 
         if not flag:
@@ -106,49 +111,45 @@ def decompress_bg(compressed_data: bytes, width: int, height: int) -> bytes:
             num8 = 0
             num9 = 0
 
-            if src_pos < len(compressed_data):
-                b = compressed_data[src_pos]
+            b = dat_data[num4]
 
-                if b >= 192:
-                    num7 = b - 192 + 1
-                if 128 <= b < 192:
-                    num8 = b - 128 + 1
-                if 64 <= b < 128:
-                    num9 = b - 64
-                    num8 = 1
-                if b < 64:
-                    num8 = 1
-                    num9 = b
+            if b >= 192:
+                num7 = b - 192 + 1
+            if 128 <= b < 192:
+                num8 = b - 128 + 1
+            if 64 <= b < 128:
+                num9 = b - 64
+                num8 = 1
+                flag = True
+            if b <= 63:
+                num8 = 1
+                num9 = b
 
             x += num7
             if x >= width:
                 x = 0
                 y += 1
+                flag = False
         else:
-            # Draw mode
-            count = num9
-
-            for i in range(count + 1):
+            # Draw mode - read color from current num4 position
+            for i in range(num9 + 1):
                 # Extra x increment for copy mode (64-127)
                 if 64 <= b < 128:
                     x += 1
 
-                # Get color index from current src position
-                if src_pos < len(compressed_data):
-                    color_idx = compressed_data[src_pos]
-                    if 0 <= x < width and 0 <= y < height:
-                        dst[y * width + x] = color_idx
+                color_idx = dat_data[num4]
+                if 0 <= x < width and 0 <= y < height:
+                    dst[y * width + x] = color_idx
 
                 x += 1
                 if x >= width:
                     x = 0
                     y += 1
-                    if y >= height:
-                        break
+                    flag = False
 
             num8 -= 1
 
-        src_pos += 1
+        num4 += 1
 
     return bytes(dst)
 
@@ -178,11 +179,8 @@ def decode_bg_image(
     if width <= 0 or height <= 0:
         raise ValueError(f"Invalid dimensions: {width}x{height}")
 
-    # Extract compressed data (skip 4-byte header)
-    compressed = dat_data[start_offset + 4 : start_offset + length]
-
-    # Decompress to get palette indices
-    pixel_indices = decompress_bg(compressed, width, height)
+    # Decompress to get palette indices (pass full dat_data and offset)
+    pixel_indices = decompress_bg(dat_data, start_offset, length, width, height)
 
     # Convert to RGB using palette
     rgb_data = bytearray(width * height * 3)
