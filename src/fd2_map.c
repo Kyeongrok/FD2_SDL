@@ -10,7 +10,9 @@
  */
 
 #include "../include/fd2_map.h"
+// 为了提供地图 -> 索引图的渲染能力，引入图像模块
 #include "../include/fd2_dat.h"
+#include "../include/fd2_image.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -182,6 +184,21 @@ int map_load_level(BattleMap* map, const byte* field_data, dword field_size, con
     printf("[地图] 加载成功: %dx%d\n", map->width, map->height);
     
     return 0;
+}
+
+/* Convert a BattleMap into a palette-index Image for rendering */
+void* map_to_index_image(const BattleMap* map) {
+    if (!map || !map->tiles) return NULL;
+    int w = map->width;
+    int h = map->height;
+    Image* img = image_index_alloc(w, h);
+    if (!img) return NULL;
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            img->data[y * w + x] = map->tiles[y * w + x].tile_id;
+        }
+    }
+    return (void*)img;
 }
 
 void map_free(BattleMap* map) {

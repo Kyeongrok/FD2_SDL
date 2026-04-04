@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+
 #define MAX_MAP_WIDTH 64
 #define MAX_MAP_HEIGHT 64
 #define MAX_TILES 256
@@ -70,6 +71,10 @@ typedef struct {
     byte* raw_data;
     dword raw_size;
 } BattleMap;
+
+/* Render helper: convert a map to an Image of palette indices
+   The returned Image contains width x height with tile_id values as indices. */
+void* map_to_index_image(const BattleMap* map);
 
 typedef struct {
     byte x;

@@ -215,10 +215,44 @@ Image* image_decode_bg(const byte* data, int size, const Palette* palette) {
     return img;
 }
 
+Image* image_index_alloc(int width, int height) {
+    if (width <= 0 || height <= 0) return NULL;
+    Image* img = (Image*)malloc(sizeof(Image));
+    if (!img) return NULL;
+    img->width = width;
+    img->height = height;
+    img->data = (byte*)malloc(width * height);
+    if (!img->data) {
+        free(img);
+        return NULL;
+    }
+    memset(img->data, 0, width * height);
+    return img;
+}
+
+void image_set_pixel_index(Image* img, int x, int y, byte idx) {
+    if (!img) return;
+    if (x < 0 || y < 0 || x >= img->width || y >= img->height) return;
+    img->data[y * img->width + x] = idx;
+}
+
 void image_free(Image* img) {
     if (img) {
         if (img->data) free(img->data);
         free(img);
+    }
+}
+
+void image_render_to_screen(byte* screen, int screen_w, int screen_h, int x, int y, const Image* img) {
+    if (!screen || !img) return;
+    for (int dy = 0; dy < img->height; dy++) {
+        int sy = y + dy;
+        if (sy < 0 || sy >= screen_h) continue;
+        for (int dx = 0; dx < img->width; dx++) {
+            int sx = x + dx;
+            if (sx < 0 || sx >= screen_w) continue;
+            screen[sy * screen_w + sx] = img->data[dy * img->width + dx];
+        }
     }
 }
 

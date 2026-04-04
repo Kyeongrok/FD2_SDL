@@ -129,4 +129,13 @@ void image_blit(byte* dst, int dst_w, int dst_h, int x, int y, int w, int h, con
  */
 void image_fill(byte* img, int w, int h, byte color);
 
+/* Allocate an Image for raw palette-index data (width x height) */
+Image* image_index_alloc(int width, int height);
+
+/* Set a pixel value by palette index (not converted to RGB here) */
+void image_set_pixel_index(Image* img, int x, int y, byte idx);
+
+/* 渲染：将索引图像直接写入屏幕缓冲区（以调色板索引为单位） */
+void image_render_to_screen(byte* screen, int screen_w, int screen_h, int x, int y, const Image* img);
+
 #endif /* FD2_IMAGE_H */
