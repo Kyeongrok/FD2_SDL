@@ -30,7 +30,7 @@ typedef struct {
 /**
  * 简单图像结构
  */
-typedef struct {
+typedef struct Image {
     int width;
     int height;
     byte* data;  // 调色板索引
@@ -138,5 +138,11 @@ void image_set_pixel_index(Image* img, int x, int y, byte idx);
 
 /* 渲染：将索引图像直接写入屏幕缓冲区（以调色板索引为单位） */
 void image_render_to_screen(byte* screen, int screen_w, int screen_h, int x, int y, const Image* img);
+
+/* Create an Image from a raw palette-index data buffer (width x height) */
+Image* image_from_indices(const byte* indices, int width, int height);
+
+/* Render a raw palette-index buffer directly to screen (no intermediate Image) */
+void render_indices_to_screen(byte* screen, int screen_w, int screen_h, int x, int y, const byte* indices, int width, int height);
 
 #endif /* FD2_IMAGE_H */

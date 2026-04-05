@@ -215,6 +215,29 @@ Image* image_decode_bg(const byte* data, int size, const Palette* palette) {
     return img;
 }
 
+Image* image_from_indices(const byte* indices, int width, int height) {
+    if (!indices || width <= 0 || height <= 0) return NULL;
+    Image* img = (Image*)malloc(sizeof(Image));
+    if (!img) return NULL;
+    img->width = width;
+    img->height = height;
+    img->data = (byte*)malloc(width * height);
+    if (!img->data) {
+        free(img);
+        return NULL;
+    }
+    memcpy(img->data, indices, width * height);
+    return img;
+}
+
+void render_indices_to_screen(byte* screen, int screen_w, int screen_h, int x, int y, const byte* indices, int width, int height) {
+    if (!indices) return;
+    Image* img = image_from_indices(indices, width, height);
+    if (!img) return;
+    image_render_to_screen(screen, screen_w, screen_h, x, y, img);
+    image_free(img);
+}
+
 Image* image_index_alloc(int width, int height) {
     if (width <= 0 || height <= 0) return NULL;
     Image* img = (Image*)malloc(sizeof(Image));

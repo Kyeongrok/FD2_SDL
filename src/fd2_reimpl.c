@@ -8,6 +8,7 @@
 #include "fd2_sdl_renderer.h"
 #endif
 #include "../include/fd2_map.h"
+#include "../include/fd2_image.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -481,6 +482,18 @@ void update_game(GameState* state) {
 void render_game(GameState* state) {
     // Phase-2: render current map as an index-based image if available
     map_render_current_map_to_screen(state->screen_buffer, SCREEN_WIDTH, SCREEN_HEIGHT);
+    // Phase-3: render a small test overlay using direct index data for demonstration
+    {
+        // Simple 4x4 checkerboard of palette indices
+        const byte indices[16] = {
+            0, 1, 2, 3,
+            4, 5, 6, 7,
+            8, 9,10,11,
+            12,13,14,15
+        };
+        // render at top-left corner as a demonstration overlay
+        render_indices_to_screen(state->screen_buffer, SCREEN_WIDTH, SCREEN_HEIGHT, 2, 2, indices, 4, 4);
+    }
 #ifdef USE_SDL
     if (state->sdl_renderer) {
         sdl_render_frame(state);
