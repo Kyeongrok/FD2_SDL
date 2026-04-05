@@ -25,6 +25,12 @@ typedef uint32_t dword;
 #define MAX_RESOURCES 1000
 #define MAX_DAT_FILES 20
 
+// Rendering开关：开启地图索引渲染覆盖层，便于阶段性验证渲染管线
+// 未来可改为运行时开关或配置项
+#ifndef ENABLE_MAP_INDEX_RENDER
+#define ENABLE_MAP_INDEX_RENDER 1
+#endif
+
 // 文件句柄
 typedef struct {
     byte* data;

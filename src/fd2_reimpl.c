@@ -482,8 +482,9 @@ void update_game(GameState* state) {
 void render_game(GameState* state) {
     // Phase-2: render current map as an index-based image if available
     map_render_current_map_to_screen(state->screen_buffer, SCREEN_WIDTH, SCREEN_HEIGHT);
-    // Phase-3: render a small test overlay using direct index data for demonstration
+    #if ENABLE_MAP_INDEX_RENDER
     {
+        // Phase-3: render a small test overlay using direct index data for demonstration
         // Simple 4x4 checkerboard of palette indices
         const byte indices[16] = {
             0, 1, 2, 3,
@@ -491,9 +492,10 @@ void render_game(GameState* state) {
             8, 9,10,11,
             12,13,14,15
         };
-        // render at top-left corner as a demonstration overlay
+        // render at (2,2) as a demonstration overlay
         render_indices_to_screen(state->screen_buffer, SCREEN_WIDTH, SCREEN_HEIGHT, 2, 2, indices, 4, 4);
     }
+    #endif
 #ifdef USE_SDL
     if (state->sdl_renderer) {
         sdl_render_frame(state);
