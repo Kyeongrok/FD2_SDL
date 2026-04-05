@@ -97,6 +97,24 @@ static int map_decompress_rle(const byte* src, int src_size, byte* dst, int dst_
     return 0;
 }
 
+/* Render map to the current render target via image module */
+static BattleMap* g_render_map = NULL;
+void map_set_current_for_rendering(BattleMap* map) {
+    g_render_map = map;
+}
+BattleMap* map_get_current_for_rendering(void) {
+    return g_render_map;
+}
+
+void map_render_current_map_to_screen(byte* screen, int screen_w, int screen_h) {
+    if (!g_render_map) return;
+    void* idx = map_to_index_image(g_render_map);
+    if (idx) {
+        image_render_to_screen(screen, screen_w, screen_h, 0, 0, (Image*)idx);
+        image_free((Image*)idx);
+    }
+}
+
 int map_load_level(BattleMap* map, const byte* field_data, dword field_size, const LevelHeader* header) {
     if (!map || !field_data || field_size < 4) return -1;
     
@@ -167,6 +185,9 @@ int map_load_level(BattleMap* map, const byte* field_data, dword field_size, con
     }
     
     free(decompressed);
+
+    // 注册当前渲染地图，便于后续渲染阶段直接输出地图索引图像
+    map_set_current_for_rendering(map);
     
     if (header) {
         map->header = (LevelHeader*)malloc(sizeof(LevelHeader));

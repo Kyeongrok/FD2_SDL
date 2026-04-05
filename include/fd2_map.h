@@ -76,6 +76,11 @@ typedef struct {
    The returned Image contains width x height with tile_id values as indices. */
 void* map_to_index_image(const BattleMap* map);
 
+/* Rendering glue: expose current map for rendering via image module */
+void map_set_current_for_rendering(BattleMap* map);
+BattleMap* map_get_current_for_rendering(void);
+void map_render_current_map_to_screen(byte* screen, int screen_w, int screen_h);
+
 typedef struct {
     byte x;
     byte y;

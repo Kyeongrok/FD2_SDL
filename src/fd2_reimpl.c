@@ -7,6 +7,7 @@
 #ifdef USE_SDL
 #include "fd2_sdl_renderer.h"
 #endif
+#include "../include/fd2_map.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -478,6 +479,8 @@ void update_game(GameState* state) {
 }
 
 void render_game(GameState* state) {
+    // Phase-2: render current map as an index-based image if available
+    map_render_current_map_to_screen(state->screen_buffer, SCREEN_WIDTH, SCREEN_HEIGHT);
 #ifdef USE_SDL
     if (state->sdl_renderer) {
         sdl_render_frame(state);
