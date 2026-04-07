@@ -507,6 +507,18 @@ void render_game(GameState* state) {
 #endif
 #ifdef USE_SDL
     if (state->sdl_renderer) {
+        // 处理简单输入事件：切换 Overlay 开关
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_QUIT) {
+                state->running = false;
+                return;
+            }
+            if (e.type == SDL_KEYDOWN && (e.key.keysym.sym == SDLK_o)) {
+                g_overlay_runtime = !g_overlay_runtime;
+                printf("Overlay runtime toggled: %s\n", g_overlay_runtime ? "ON":"OFF");
+            }
+        }
         sdl_render_frame(state);
     } else {
         static const char* chars = " .:-=+*#%@";

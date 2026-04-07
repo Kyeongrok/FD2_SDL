@@ -21,9 +21,13 @@ SDL_LIBS = -lSDL2main -lSDL2 -lm
 CORE_MODULES = $(SRC_DIR)/fd2_palette.c $(SRC_DIR)/fd2_dat.c $(SRC_DIR)/fd2_rle.c $(SRC_DIR)/fd2_video.c
 # 图像解码模块
 CORE_MODULES += $(SRC_DIR)/fd2_image.c
+# 资源加载模块
+CORE_MODULES += $(SRC_DIR)/fd2_resources.c
+# 移动系统模块
+CORE_MODULES += $(SRC_DIR)/fd2_movement.c
 
 # 默认目标：非SDL版本
-all: fd2_game fd2_game_sdl fd2_reimpl fd2_reimpl_sdl
+all: fd2_game fd2_game_sdl fd2_reimpl fd2_reimpl_sdl test_unit_render test_map_render
 
 # 非SDL版本（控制台ASCII）
 fd2_game: $(SRC_DIR)/fd2_game.c $(CORE_MODULES) $(INC_DIR)/fd2_sdl_renderer.h $(INC_DIR)/fd2_types.h $(INC_DIR)/fd2_palette.h $(INC_DIR)/fd2_dat.h $(INC_DIR)/fd2_rle.h $(INC_DIR)/fd2_video.h
@@ -55,6 +59,14 @@ test_map: test_map.c $(SRC_DIR)/fd2_map.c $(SRC_DIR)/fd2_dat.c $(INC_DIR)/fd2_ma
 # New: test image decoding module
 test-image: src/test_image.c $(SRC_DIR)/fd2_image.c src/fd2_test_logging.c
 	$(CC) $(CFLAGS) -I$(INC_DIR) -o $(BIN_DIR)/test_image src/test_image.c $(SRC_DIR)/fd2_image.c src/fd2_test_logging.c -lm
+
+# 单位移动测试
+test_unit_render: src/test_unit_render.c $(CORE_MODULES)
+	$(CC) $(CFLAGS) $(SDL_CFLAGS) -I$(INC_DIR) -o $(BIN_DIR)/test_unit_render src/test_unit_render.c $(CORE_MODULES) $(SDL_LDFLAGS) $(SDL_LIBS)
+
+# 地图渲染测试
+test_map_render: src/test_map_render.c $(CORE_MODULES)
+	$(CC) $(CFLAGS) $(SDL_CFLAGS) -I$(INC_DIR) -o $(BIN_DIR)/test_map_render src/test_map_render.c $(CORE_MODULES) $(SDL_LDFLAGS) $(SDL_LIBS)
 
 clean:
 	rm -f $(BIN_DIR)/*.exe $(BIN_DIR)/*.o *.o
