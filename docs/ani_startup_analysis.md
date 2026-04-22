@@ -1,63 +1,63 @@
-# ANI.DAT 启动动画分析
+# ANI.DAT 시작 애니메이션 분석
 
-## 概述
+## 개요
 
-本文档分析游戏《炎龙骑士团2》中 `ANI.DAT` 文件的加载和播放机制，包括启动过程中所有相关函数的调用关系和伪代码实现。
+본 문서는 게임 《용의기사2》에서 `ANI.DAT` 파일의 로드와 재생 메커니즘을 분석한다. 시작 과정 중의 모든 관련 함수의 호출 관계와 의사 코드 구현을 포함한다.
 
-## 目录
+## 목차
 
-1. [ANI.DAT 文件格式](#ani.dat-文件格式)
-2. [函数调用关系](#函数调用关系)
-3. [核心函数分析](#核心函数分析)
-4. [启动流程时序](#启动流程时序)
-5. [伪代码实现](#伪代码实现)
+1. [ANI.DAT 파일 포맷](#anidat-파일-포맷)
+2. [함수 호출 관계](#함수-호출-관계)
+3. [핵심 함수 분석](#핵심-함수-분석)
+4. [시작 흐름 타이밍](#시작-흐름-타이밍)
+5. [의사 코드 구현](#의사-코드-구현)
 
 ---
 
-## ANI.DAT 文件格式
+## ANI.DAT 파일 포맷
 
-### 文件头结构
+### 파일 헤더 구조
 ```
-偏移量    大小    描述
-0x00      4       资源0的偏移量
-0x04      4       资源1的偏移量
-0x06      4*      资源表 (每个资源4字节)
+오프셋     크기    설명
+0x00      4       리소스 0 의 오프셋
+0x04      4       리소스 1 의 오프셋
+0x06      4*      리소스 테이블 (리소스당 4바이트)
 ```
 
-### 资源头结构 (173字节)
+### 리소스 헤더 구조 (173바이트)
 ```
-偏移量    大小    描述
-0xA5      2       Block数量 (word)
+오프셋     크기    설명
+0xA5      2       Block 개수 (word)
 ...
 ```
 
-### Block头结构 (6字节)
+### Block 헤더 구조 (6바이트)
 ```
-偏移量    大小    描述
-0x00      2       Block数据大小
-0x02      2       命令数量
+오프셋     크기    설명
+0x00      2       Block 데이터 크기
+0x02      2       명령 개수
 ```
 
-### 命令类型 (0-9)
+### 명령 타입 (0-9)
 
-| 命令 | 函数 | 描述 |
+| 명령 | 함수 | 설명 |
 |------|------|------|
-| 0 | do_h0 | 设置调色板为单一颜色 (96项) |
-| 1 | do_h1 | 直接复制调色板 (768字节) |
-| 2 | do_h2 | RLE压缩调色板解压 |
-| 3 | do_h3 | 部分调色板更新 |
-| 4 | do_h4 | 用单一颜色填充屏幕 |
-| 5 | do_h5 | 直接复制屏幕 (64000字节) |
-| 6 | do_h6 | RLE压缩屏幕解压 |
-| 7 | do_h7 | 屏幕区域填充 |
-| 8 | do_h8 | 设置单个像素 |
-| 9 | do_h9 | 屏幕数据块复制 |
+| 0 | do_h0 | 팔레트를 단일 색상으로 설정 (96항) |
+| 1 | do_h1 | 팔레트 직접 복사 (768바이트) |
+| 2 | do_h2 | RLE 압축 팔레트 압축 해제 |
+| 3 | do_h3 | 팔레트 부분 업데이트 |
+| 4 | do_h4 | 화면을 단일 색상으로 채우기 |
+| 5 | do_h5 | 화면 직접 복사 (64000바이트) |
+| 6 | do_h6 | RLE 압축 화면 압축 해제 |
+| 7 | do_h7 | 화면 영역 채우기 |
+| 8 | do_h8 | 단일 픽셀 설정 |
+| 9 | do_h9 | 화면 데이터 블록 복사 |
 
 ---
 
-## 函数调用关系
+## 함수 호출 관계
 
-### ANI.DAT 播放核心调用链
+### ANI.DAT 재생 핵심 호출 체인
 
 ```
 play_ani_resource()
@@ -70,106 +70,106 @@ play_ani_resource()
 │   ├── memset(ani_palette_buf, 0, 768)
 │   ├── decode_ani_block()
 │   │   └── run_ani_command()
-│   │       ├── do_h0()  - 设置调色板为单一颜色
-│   │       ├── do_h1()  - 复制调色板
-│   │       ├── do_h2()  - RLE压缩调色板
-│   │       ├── do_h3()  - 部分调色板更新
-│   │       ├── do_h4()  - 用单一颜色填充屏幕
-│   │       ├── do_h5()  - 复制屏幕
-│   │       ├── do_h6()  - RLE压缩屏幕
-│   │       ├── do_h7()  - 屏幕区域填充
-│   │       ├── do_h8()  - 设置单个像素
-│   │       └── do_h9()  - 屏幕数据块复制
+│   │       ├── do_h0()  - 팔레트를 단일 색상으로
+│   │       ├── do_h1()  - 팔레트 복사
+│   │       ├── do_h2()  - RLE 압축 팔레트
+│   │       ├── do_h3()  - 팔레트 부분 업데이트
+│   │       ├── do_h4()  - 화면을 단일 색상으로 채움
+│   │       ├── do_h5()  - 화면 복사
+│   │       ├── do_h6()  - RLE 압축 화면
+│   │       ├── do_h7()  - 화면 영역 채우기
+│   │       ├── do_h8()  - 단일 픽셀 설정
+│   │       └── do_h9()  - 화면 데이터 블록 복사
 │   ├── delay_ms(frame_delay)
 │   └── check_key_input()
 └── fclose()
 ```
 
-### 原始IDA逆向函数对应关系
+### 원본 IDA 역공학 함수 대응 관계
 
-| C实现函数 | IDA函数地址 | 描述 |
+| C 구현 함수 | IDA 함수 주소 | 설명 |
 |----------|------------|------|
-| play_ani_resource() | sub_20421 | 主播放函数 |
-| decode_ani_block() | sub_36FF4 | Block解码调度器 |
-| do_h0() | sub_36E3D | 命令0处理 |
-| do_h1() | sub_36E57 | 命令1处理 |
-| do_h2() | sub_36E65 | 命令2处理 |
-| do_h3() | sub_36EA7 | 命令3处理 |
-| do_h4() | sub_36EE0 | 命令4处理 |
-| do_h5() | sub_36F08 | 命令5处理 |
-| do_h6() | sub_36F24 | 命令6处理 |
-| do_h7() | sub_36F69 | 命令7处理 |
-| do_h8() | sub_36F82 | 命令8处理 |
-| do_h9() | sub_36FAC | 命令9处理 |
+| play_ani_resource() | sub_20421 | 메인 재생 함수 |
+| decode_ani_block() | sub_36FF4 | Block 디코드 디스패처 |
+| do_h0() | sub_36E3D | 명령 0 처리 |
+| do_h1() | sub_36E57 | 명령 1 처리 |
+| do_h2() | sub_36E65 | 명령 2 처리 |
+| do_h3() | sub_36EA7 | 명령 3 처리 |
+| do_h4() | sub_36EE0 | 명령 4 처리 |
+| do_h5() | sub_36F08 | 명령 5 처리 |
+| do_h6() | sub_36F24 | 명령 6 처리 |
+| do_h7() | sub_36F69 | 명령 7 처리 |
+| do_h8() | sub_36F82 | 명령 8 처리 |
+| do_h9() | sub_36FAC | 명령 9 처리 |
 
 ---
 
-## 核心函数分析
+## 핵심 함수 분석
 
-### 1. play_ani_resource() - 主播放函数
+### 1. play_ani_resource() - 메인 재생 함수
 
-**地址:** 0x20421 (sub_20421)
+**주소:** 0x20421 (sub_20421)
 
-**功能:** 播放ANI.DAT中指定的动画资源
+**기능:** ANI.DAT 에서 지정된 애니메이션 리소스 재생
 
-**参数:**
-- res_idx: 资源索引 (0-8)
-- frame_delay: 帧延迟 (毫秒)
-- wait_key: 是否等待按键
+**인자:**
+- res_idx: 리소스 인덱스 (0-8)
+- frame_delay: 프레임 지연 (밀리초)
+- wait_key: 키 입력 대기 여부
 
-**调用者:**
-- sub_1F894 (标题画面)
-- sub_1F81E (菜单处理)
-- sub_24336 (游戏启动)
+**호출자:**
+- sub_1F894 (타이틀 화면)
+- sub_1F81E (메뉴 처리)
+- sub_24336 (게임 시작)
 
-### 2. decode_ani_block() - Block解码器
+### 2. decode_ani_block() - Block 디코더
 
-**地址:** 0x36FF4 (sub_36FF4)
+**주소:** 0x36FF4 (sub_36FF4)
 
-**功能:** 解析Block数据并执行命令序列
+**기능:** Block 데이터를 파싱하고 명령 시퀀스 실행
 
-**实现方式:** 使用跳转表调度命令处理函数
+**구현 방식:** 점프 테이블로 명령 처리 함수 디스패치
 
-### 3. run_ani_command() - 命令调度器
+### 3. run_ani_command() - 명령 디스패처
 
-**功能:** 根据命令号调用对应的处理函数
+**기능:** 명령 번호에 따라 대응 처리 함수 호출
 
 ---
 
-## 启动流程时序
+## 시작 흐름 타이밍
 
-### 阶段1: 初始化
+### 단계 1: 초기화
 ```
 main()
 ├── init_game_machine()
 ├── load_resources()
-│   └── load_ani_cached(0)  // 加载标题动画资源信息
+│   └── load_ani_cached(0)  // 타이틀 애니메이션 리소스 정보 로드
 └── run_full_startup_sequence()
 ```
 
-### 阶段2: 启动动画播放
+### 단계 2: 시작 애니메이션 재생
 ```
 run_full_startup_sequence()
-├── Phase 1: 播放开场动画
+├── Phase 1: 오프닝 애니메이션 재생
 │   ├── load_ani_cached(0)
 │   ├── for i in range(30):
-│   │   └── decode_ani_block(i)  // 逐帧解码
-│   └── 延迟处理
+│   │   └── decode_ani_block(i)  // 프레임별 디코드
+│   └── 지연 처리
 │
-├── Phase 2: 播放资源3动画 (90ms/帧)
+├── Phase 2: 리소스 3 애니메이션 재생 (90ms/프레임)
 │   └── play_ani_resource(3, 90, 1)
 │
-├── Phase 3: 条形动画 (535帧)
+├── Phase 3: 바 애니메이션 (535 프레임)
 │   └── bar_animation()
 │
-├── Phase 4: 淡入淡出效果
+├── Phase 4: 페이드 인/아웃 효과
 │   └── fade_effect()
 │
-└── Phase 5: 播放资源1动画 (15ms/帧)
+└── Phase 5: 리소스 1 애니메이션 재생 (15ms/프레임)
     └── play_ani_resource(1, 15, 1)
 ```
 
-### 阶段3: 标题画面
+### 단계 3: 타이틀 화면
 ```
 game_loop()
 ├── if state == STATE_TITLE:
@@ -181,44 +181,44 @@ game_loop()
 
 ---
 
-## 伪代码实现
+## 의사 코드 구현
 
-### play_ani_resource() - ANI播放主函数
+### play_ani_resource() - ANI 재생 메인 함수
 
 ```c
 /**
- * 播放ANI.DAT中的指定资源
- * @param res_idx 资源索引
- * @param frame_delay 帧间延迟(ms)
- * @param wait_key 是否等待按键
- * @return 成功返回0，失败返回-1
+ * ANI.DAT 의 지정 리소스 재생
+ * @param res_idx 리소스 인덱스
+ * @param frame_delay 프레임 간 지연 (ms)
+ * @param wait_key 키 입력 대기 여부
+ * @return 성공 시 0, 실패 시 -1
  */
 int play_ani_resource(int res_idx, int frame_delay, int wait_key)
 {
     FILE* fp = fopen("ANI.DAT", "rb");
     if (!fp) return -1;
     
-    // 定位到资源偏移表
+    // 리소스 오프셋 테이블로 탐색
     fseek(fp, 4 * res_idx + 6, SEEK_SET);
     dword offset;
     fread(&offset, 4, 1, fp);
     
-    // 读取资源头 (173字节)
+    // 리소스 헤더 읽기 (173바이트)
     fseek(fp, offset, SEEK_SET);
     byte header[173];
     fread(header, 1, 173, fp);
     
-    // 获取Block数量 (偏移0xA5)
+    // Block 개수 획득 (오프셋 0xA5)
     word block_count = *(word*)(header + 165);
     
-    // 分配缓冲区
+    // 버퍼 할당
     byte* screen_buf = malloc(64000);
     byte* palette_buf = malloc(768);
     
-    // 逐Block处理
+    // Block 별 처리
     for (int i = 0; i < block_count; i++)
     {
-        // 读取Block头 (6字节: size + cmd_count)
+        // Block 헤더 읽기 (6바이트: size + cmd_count)
         byte block_header[6];
         fread(block_header, 1, 6, fp);
         
@@ -227,25 +227,25 @@ int play_ani_resource(int res_idx, int frame_delay, int wait_key)
         
         if (size == 0 || cmd_count == 0) continue;
         
-        // 读取Block数据
+        // Block 데이터 읽기
         byte* block_data = malloc(size);
         fread(block_data, 1, size, fp);
         
-        // 清空缓冲区
+        // 버퍼 클리어
         memset(screen_buf, 0, 64000);
         memset(palette_buf, 0, 768);
         
-        // 解码Block
+        // Block 디코드
         decode_ani_block(block_data, size, cmd_count, screen_buf, palette_buf);
         
-        // 渲染到屏幕
+        // 화면에 렌더링
         render_frame(screen_buf);
         apply_palette(palette_buf);
         
-        // 帧间延迟
+        // 프레임 간 지연
         delay_ms(frame_delay);
         
-        // 检查按键
+        // 키 입력 체크
         if (wait_key && key_pressed())
             break;
         
@@ -259,16 +259,16 @@ int play_ani_resource(int res_idx, int frame_delay, int wait_key)
 }
 ```
 
-### decode_ani_block() - Block解码器
+### decode_ani_block() - Block 디코더
 
 ```c
 /**
- * 解码ANI Block
- * @param data Block数据
- * @param size 数据大小
- * @param cmd_count 命令数量
- * @param screen 屏幕缓冲区
- * @param palette 调色板缓冲区
+ * ANI Block 디코드
+ * @param data Block 데이터
+ * @param size 데이터 크기
+ * @param cmd_count 명령 개수
+ * @param screen 화면 버퍼
+ * @param palette 팔레트 버퍼
  */
 void decode_ani_block(byte* data, int size, int cmd_count, 
                       byte* screen, byte* palette)
@@ -289,17 +289,17 @@ void decode_ani_block(byte* data, int size, int cmd_count,
 }
 ```
 
-### run_ani_command() - 命令调度器
+### run_ani_command() - 명령 디스패처
 
 ```c
 /**
- * 执行ANI命令
- * @param cmd 命令号 (0-9)
- * @param data 命令数据
- * @param size 剩余数据大小
- * @param screen 屏幕缓冲区
- * @param palette 调色板缓冲区
- * @return 消耗的字节数
+ * ANI 명령 실행
+ * @param cmd 명령 번호 (0-9)
+ * @param data 명령 데이터
+ * @param size 남은 데이터 크기
+ * @param screen 화면 버퍼
+ * @param palette 팔레트 버퍼
+ * @return 소비된 바이트 수
  */
 int run_ani_command(byte cmd, byte* data, int size, 
                     byte* screen, byte* palette)
@@ -321,19 +321,19 @@ int run_ani_command(byte cmd, byte* data, int size,
 }
 ```
 
-### do_h0() - 设置调色板为单一颜色
+### do_h0() - 팔레트를 단일 색상으로 설정
 
 ```c
 /**
- * 命令0: 设置调色板前96项为单一颜色
- * @param data 1字节颜色值
- * @param palette 调色板缓冲区
- * @return 消耗字节数 (1)
+ * 명령 0: 팔레트 앞 96항을 단일 색상으로 설정
+ * @param data 1바이트 색상 값
+ * @param palette 팔레트 버퍼
+ * @return 소비 바이트 수 (1)
  */
 int do_h0(byte* data, byte* palette)
 {
     byte b = data[0];
-    dword color = (b << 16) | (b << 8) | b;  // RGB相同
+    dword color = (b << 16) | (b << 8) | b;  // RGB 동일
     
     dword* p = (dword*)palette;
     for (int i = 0; i < 96; i++)
@@ -343,15 +343,15 @@ int do_h0(byte* data, byte* palette)
 }
 ```
 
-### do_h1() - 直接复制调色板
+### do_h1() - 팔레트 직접 복사
 
 ```c
 /**
- * 命令1: 直接复制调色板数据
- * @param data 调色板数据 (最多768字节)
- * @param size 数据大小
- * @param palette 调色板缓冲区
- * @return 消耗字节数
+ * 명령 1: 팔레트 데이터 직접 복사
+ * @param data 팔레트 데이터 (최대 768바이트)
+ * @param size 데이터 크기
+ * @param palette 팔레트 버퍼
+ * @return 소비 바이트 수
  */
 int do_h1(byte* data, int size, byte* palette)
 {
@@ -361,15 +361,15 @@ int do_h1(byte* data, int size, byte* palette)
 }
 ```
 
-### do_h2() - RLE压缩调色板
+### do_h2() - RLE 압축 팔레트
 
 ```c
 /**
- * 命令2: RLE压缩调色板解压
- * @param data RLE压缩数据
- * @param size 数据大小
- * @param palette 调色板缓冲区
- * @return 消耗字节数
+ * 명령 2: RLE 압축 팔레트 압축 해제
+ * @param data RLE 압축 데이터
+ * @param size 데이터 크기
+ * @param palette 팔레트 버퍼
+ * @return 소비 바이트 수
  */
 int do_h2(byte* data, int size, byte* palette)
 {
@@ -380,7 +380,7 @@ int do_h2(byte* data, int size, byte* palette)
     {
         byte b = data[pos++];
         
-        if ((b & 0xC0) == 0xC0)  // RLE标记
+        if ((b & 0xC0) == 0xC0)  // RLE 마커
         {
             int run = b & 0x3F;
             byte value = data[pos++];
@@ -399,15 +399,15 @@ int do_h2(byte* data, int size, byte* palette)
 }
 ```
 
-### do_h3() - 部分调色板更新
+### do_h3() - 팔레트 부분 업데이트
 
 ```c
 /**
- * 命令3: 部分调色板更新
- * @param data 更新数据
- * @param size 数据大小
- * @param palette 调色板缓冲区
- * @return 消耗字节数
+ * 명령 3: 팔레트 부분 업데이트
+ * @param data 업데이트 데이터
+ * @param size 데이터 크기
+ * @param palette 팔레트 버퍼
+ * @return 소비 바이트 수
  */
 int do_h3(byte* data, int size, byte* palette)
 {
@@ -432,14 +432,14 @@ int do_h3(byte* data, int size, byte* palette)
 }
 ```
 
-### do_h4() - 用单一颜色填充屏幕
+### do_h4() - 단일 색상으로 화면 채우기
 
 ```c
 /**
- * 命令4: 用单一颜色填充屏幕
- * @param data 1字节颜色值
- * @param screen 屏幕缓冲区
- * @return 消耗字节数 (1)
+ * 명령 4: 단일 색상으로 화면 채우기
+ * @param data 1바이트 색상 값
+ * @param screen 화면 버퍼
+ * @return 소비 바이트 수 (1)
  */
 int do_h4(byte* data, byte* screen)
 {
@@ -447,24 +447,24 @@ int do_h4(byte* data, byte* screen)
     dword color = (b << 16) | (b << 8) | b;
     
     dword* p = (dword*)screen;
-    for (int i = 0; i < 10000; i++)  // 前40000字节用dword填充
+    for (int i = 0; i < 10000; i++)  // 앞 40000바이트는 dword 로 채움
         p[i] = color;
     
-    for (int i = 40000; i < 64000; i++)  // 剩余字节
+    for (int i = 40000; i < 64000; i++)  // 나머지 바이트
         screen[i] = b;
     
     return 1;
 }
 ```
 
-### do_h5() - 直接复制屏幕
+### do_h5() - 화면 직접 복사
 
 ```c
 /**
- * 命令5: 直接复制屏幕数据 (64000字节)
- * @param data 屏幕数据
- * @param screen 屏幕缓冲区
- * @return 消耗字节数 (64000)
+ * 명령 5: 화면 데이터 직접 복사 (64000바이트)
+ * @param data 화면 데이터
+ * @param screen 화면 버퍼
+ * @return 소비 바이트 수 (64000)
  */
 int do_h5(byte* data, byte* screen)
 {
@@ -473,15 +473,15 @@ int do_h5(byte* data, byte* screen)
 }
 ```
 
-### do_h6() - RLE压缩屏幕
+### do_h6() - RLE 압축 화면
 
 ```c
 /**
- * 命令6: RLE压缩屏幕解压
- * @param data RLE压缩数据
- * @param size 数据大小
- * @param screen 屏幕缓冲区
- * @return 消耗字节数
+ * 명령 6: RLE 압축 화면 압축 해제
+ * @param data RLE 압축 데이터
+ * @param size 데이터 크기
+ * @param screen 화면 버퍼
+ * @return 소비 바이트 수
  */
 int do_h6(byte* data, int size, byte* screen)
 {
@@ -492,21 +492,21 @@ int do_h6(byte* data, int size, byte* screen)
     {
         byte b = data[pos++];
         
-        if ((b & 0xC0) == 0xC0)  // RLE标记
+        if ((b & 0xC0) == 0xC0)  // RLE 마커
         {
             int run = b & 0x3F;
             byte value = data[pos++];
             int words = run >> 1;
             int bytes = run & 1;
             
-            // 填充word (2字节)
+            // word (2바이트) 채우기
             for (int i = 0; i < words && filled < 64000; i++)
             {
                 screen[filled++] = value;
                 if (filled < 64000) screen[filled++] = value;
             }
             
-            // 填充单字节
+            // 단일 바이트 채우기
             for (int i = 0; i < bytes && filled < 64000; i++)
                 screen[filled++] = value;
         }
@@ -520,21 +520,21 @@ int do_h6(byte* data, int size, byte* screen)
 }
 ```
 
-### do_h7() - 屏幕区域填充
+### do_h7() - 화면 영역 채우기
 
 ```c
 /**
- * 命令7: 屏幕区域填充
- * @param data 填充数据
- * @param size 数据大小
- * @param screen 屏幕缓冲区
- * @return 消耗字节数
+ * 명령 7: 화면 영역 채우기
+ * @param data 채우기 데이터
+ * @param size 데이터 크기
+ * @param screen 화면 버퍼
+ * @return 소비 바이트 수
  */
 int do_h7(byte* data, int size, byte* screen)
 {
     int pos = 0;
     
-    // 读取2字节count
+    // 2바이트 count 읽기
     int count_lo = data[pos++];
     int count_hi = data[pos++];
     int count = count_lo | (count_hi << 8);
@@ -567,21 +567,21 @@ int do_h7(byte* data, int size, byte* screen)
 }
 ```
 
-### do_h8() - 设置单个像素
+### do_h8() - 단일 픽셀 설정
 
 ```c
 /**
- * 命令8: 设置多个单像素
- * @param data 像素数据
- * @param size 数据大小
- * @param screen 屏幕缓冲区
- * @return 消耗字节数
+ * 명령 8: 여러 단일 픽셀 설정
+ * @param data 픽셀 데이터
+ * @param size 데이터 크기
+ * @param screen 화면 버퍼
+ * @return 소비 바이트 수
  */
 int do_h8(byte* data, int size, byte* screen)
 {
     int pos = 0;
     
-    // 读取2字节count
+    // 2바이트 count 읽기
     int count_lo = data[pos++];
     int count_hi = data[pos++];
     int count = count_lo | (count_hi << 8);
@@ -601,15 +601,15 @@ int do_h8(byte* data, int size, byte* screen)
 }
 ```
 
-### do_h9() - 屏幕数据块复制
+### do_h9() - 화면 데이터 블록 복사
 
 ```c
 /**
- * 命令9: 屏幕数据块复制
- * @param data 块数据
- * @param size 数据大小
- * @param screen 屏幕缓冲区
- * @return 消耗字节数
+ * 명령 9: 화면 데이터 블록 복사
+ * @param data 블록 데이터
+ * @param size 데이터 크기
+ * @param screen 화면 버퍼
+ * @return 소비 바이트 수
  */
 int do_h9(byte* data, int size, byte* screen)
 {
@@ -640,30 +640,30 @@ int do_h9(byte* data, int size, byte* screen)
 
 ---
 
-## 全局变量
+## 전역 변수
 
-| 变量名 | 地址 | 类型 | 描述 |
+| 변수명 | 주소 | 타입 | 설명 |
 |--------|------|------|------|
-| ani_screen_buf | - | byte[64000] | 屏幕缓冲区 |
-| ani_palette_buf | - | byte[768] | 调色板缓冲区 |
-| g_ani_res_idx | - | int | 当前ANI资源索引 |
-| g_ani_frame | 0x138 | int | 当前帧号 |
-| g_ani_block_count | - | int | Block数量 |
-| g_ani_blocks | - | ANIBlockInfo* | Block信息缓存 |
-| g_ani_cache | - | byte* | Block数据缓存 |
+| ani_screen_buf | - | byte[64000] | 화면 버퍼 |
+| ani_palette_buf | - | byte[768] | 팔레트 버퍼 |
+| g_ani_res_idx | - | int | 현재 ANI 리소스 인덱스 |
+| g_ani_frame | 0x138 | int | 현재 프레임 번호 |
+| g_ani_block_count | - | int | Block 개수 |
+| g_ani_blocks | - | ANIBlockInfo* | Block 정보 캐시 |
+| g_ani_cache | - | byte* | Block 데이터 캐시 |
 
 ---
 
-## 总结
+## 정리
 
-ANI.DAT动画系统采用基于命令的帧描述格式：
+ANI.DAT 애니메이션 시스템은 명령 기반 프레임 기술 포맷을 사용한다:
 
-1. **文件结构**: 资源表 → 资源头 → Block头 → Block数据
-2. **命令系统**: 10种命令处理调色板和屏幕数据
-3. **压缩方式**: 支持RLE压缩和直接数据复制
-4. **播放机制**: 每帧独立解码，支持帧间延迟和按键中断
+1. **파일 구조**: 리소스 테이블 → 리소스 헤더 → Block 헤더 → Block 데이터
+2. **명령 시스템**: 10종 명령으로 팔레트와 화면 데이터 처리
+3. **압축 방식**: RLE 압축과 직접 데이터 복사 지원
+4. **재생 메커니즘**: 프레임별 독립 디코드, 프레임 간 지연과 키 인터럽트 지원
 
-启动流程中的ANI资源使用：
-- **资源0**: 标题动画
-- **资源1**: 菜单动画 (15ms/帧)
-- **资源3**: 开场动画 (90ms/帧)
+시작 흐름에서의 ANI 리소스 사용:
+- **리소스 0**: 타이틀 애니메이션
+- **리소스 1**: 메뉴 애니메이션 (15ms/프레임)
+- **리소스 3**: 오프닝 애니메이션 (90ms/프레임)
